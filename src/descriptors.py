@@ -1,54 +1,61 @@
+import abc
+
 import numpy as np
 from PIL.Image import Image
+from overrides import overrides
 
 
-class DescriptorGenerator:
-    def compute(self, input_image: Image, bins: int = 256) -> np.array:
+class HistogramDescriptor1D(abc.ABC):
+    def __init__(self, bins: int = 256):
+        self._bins = bins
+
+    @abc.abstractmethod
+    def preprocess_image(self, image: Image) -> np.array:
+        """Given an PIL.Image object, apply any preprocessing before computing the histogram."""
         pass
 
-class GreyScaleDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.array:
-        histogram, _ = np.histogram(input_image.convert('L'), bins=bins, range=(0, bins))
+    def compute(self, image: Image) -> np.array:
+        processed_input_image = self.preprocess_image(image)
+        assert len(processed_input_image.shape) == 2, "Expected input image to be of size (H, W)"
+        histogram, _ = np.histogram(processed_input_image, bins=self._bins, range=(0, self._bins))
         return histogram
 
-# TODO: Combine RGB and HSL descriptors to reduce work for each image!
 
-class RedDescriptor(DescriptorGenerator): 
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        rgb_image = np.array(input_image)
-        histogram, _ = np.histogram(rgb_image[:, :, 0], bins=bins, range=(0, 255))
-        return histogram
-    
-class GreenDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        rgb_image = np.array(input_image)
-        histogram, _ = np.histogram(rgb_image[:, :, 1], bins=bins, range=(0, 255)) 
-        return histogram
-    
-class BlueDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        rgb_image = np.array(input_image)
-        histogram, _ = np.histogram(rgb_image[:, :, 2], bins=bins, range=(0, 255))
-        return histogram
-    
-# HSL
+class GreyScaleHistogramDescriptor1D(HistogramDescriptor1D):
+    @overrides
+    def preprocess_image(self, image: Image) -> np.array:
+        return np.array(image.convert('L'))
 
-class HueDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        hsv_image = input_image.convert("HSV")
-        histogram, _ = np.histogram(np.array(hsv_image)[:, :, 0] , bins=bins, range=(0, 255))
-        return histogram
-    
-class SaturationDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        hsv_image = input_image.convert("HSV")
-        histogram, _ = np.histogram(np.array(hsv_image)[:, :, 0] , bins=bins, range=(0, 255))
-        return histogram
-    
-class ValueDescriptor(DescriptorGenerator):
-    def compute(self, input_image: Image, bins: int = 256) -> np.ndarray:
-        hsv_image = input_image.convert("HSV")
-        histogram, _ = np.histogram(np.array(hsv_image)[:, :, 0] , bins=bins, range=(0, 255))
-        return histogram
+
+class RGBHistogramDescriptor1D(HistogramDescriptor1D):
+    @overrides
+    def compute(self, image: Image) -> np.array:
+        rgb_histograms = []
+        red_channel, green_channel, blue_channel = image.split()
+        rgb_histograms.append(super().compute(red_channel))
+        rgb_histograms.append(super().compute(green_channel))
+        rgb_histograms.append(super().compute(blue_channel))
+        return np.concatenate(rgb_histograms)
+
+    @overrides
+    def preprocess_image(self, image: Image) -> np.array:
+        return np.array(image)
+
+
+class HSVHistogramDescriptor1D(HistogramDescriptor1D):
+    @overrides
+    def compute(self, image: Image) -> np.array:
+        image = image.convert("HSV")
+
+        hsv_histograms = []
+        hue_channel, saturation_channel, value_channel = image.split()
+        hsv_histograms.append(super().compute(hue_channel))
+        hsv_histograms.append(super().compute(saturation_channel))
+        hsv_histograms.append(super().compute(value_channel))
+        return np.concatenate(hsv_histograms)
+
+    @overrides
+    def preprocess_image(self, image: Image) -> np.array:
+        return np.array(image)
 
 # TODO: Add CieLab, YCbCr, ...
