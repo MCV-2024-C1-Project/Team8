@@ -32,6 +32,10 @@ class HistogramIntersection(SimilarityMeasure):
 
 class HellingerKernel(SimilarityMeasure):
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
+        # Normalize
+        query_descriptors = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
+        database_descriptors = database_descriptors / np.sum(database_descriptors, axis=1, keepdims=True)
+
         query_sqrt = np.sqrt(query_descriptors)
         database_sqrt = np.sqrt(database_descriptors)
         differences = query_sqrt[:, np.newaxis, :] - database_sqrt[np.newaxis, :, :]
