@@ -17,6 +17,16 @@ class L1Distance(SimilarityMeasure):
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         differences = query_descriptors[:, np.newaxis, :] - database_descriptors[np.newaxis, :, :]
         return np.abs(differences).sum(axis=2)
+    
+class Bhattacharyya(SimilarityMeasure):
+    def computes(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
+        # Normalize histograms
+        query_normalized = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
+        database_normalized = database_descriptors / np.sum(database_descriptors, axis=1, keepdims=True)
+
+        # This uses the fact that Bhattacharyya distance is defined as:
+        distances = -np.log(np.sum(np.sqrt(query_descriptors[:, np.newaxis, :] * database_descriptors[np.newaxis, :, :]), axis=2))
+        return distances
 
 class ChiSquaredDistance(SimilarityMeasure):
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
