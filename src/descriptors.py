@@ -44,3 +44,25 @@ class ColorHistogramDescriptor1D(HistogramDescriptor1D):
         channels = np.split(processed_input_image, processed_input_image.shape[2], axis=2)
         histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
         return np.concatenate(histograms)
+
+
+class MultiColorSpaceHistogramDescriptor1D():
+    def __init__(self, color_spaces: list[str], bins: int = 256):
+        self._bins = bins
+        self.color_spaces = color_spaces
+        self.color_space = ' - '.join(color_spaces)
+
+    def preprocess_image(self, image: Image, color_space: str) -> np.array:
+        return np.array(image.convert(color_space))
+
+    def compute(self, image: Image) -> np.array:
+        all_histograms = []
+
+        for color_space in self.color_spaces:
+            processed_input_image = self.preprocess_image(image, color_space)
+            assert processed_input_image.ndim == 3, f"Image in color space {color_space} should be (H, W, C)"
+            channels = np.split(processed_input_image, processed_input_image.shape[2], axis=2)
+            histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
+            all_histograms.append(np.concatenate(histograms))
+
+        return np.concatenate(all_histograms)
