@@ -1,9 +1,7 @@
 import abc
-
 import numpy as np
-from PIL.Image import Image
+from PIL import Image
 from overrides import overrides
-
 
 class HistogramDescriptor1D(abc.ABC):
     def __init__(self, bins: int = 256):
@@ -16,46 +14,33 @@ class HistogramDescriptor1D(abc.ABC):
 
     def compute(self, image: Image) -> np.array:
         processed_input_image = self.preprocess_image(image)
-        assert len(processed_input_image.shape) == 2, "Expected input image to be of size (H, W)"
+        assert processed_input_image.ndim == 2, "Image should be 2D (H, W)"
         histogram, _ = np.histogram(processed_input_image, bins=self._bins, range=(0, self._bins))
         return histogram
 
-
 class GreyScaleHistogramDescriptor1D(HistogramDescriptor1D):
+    def __init__(self, bins: int = 256):
+        super().__init__(bins)
+        self.color_space = "GreyScale"
+
     @overrides
     def preprocess_image(self, image: Image) -> np.array:
         return np.array(image.convert('L'))
 
 
-class RGBHistogramDescriptor1D(HistogramDescriptor1D):
-    @overrides
-    def compute(self, image: Image) -> np.array:
-        rgb_histograms = []
-        red_channel, green_channel, blue_channel = image.split()
-        rgb_histograms.append(super().compute(red_channel))
-        rgb_histograms.append(super().compute(green_channel))
-        rgb_histograms.append(super().compute(blue_channel))
-        return np.concatenate(rgb_histograms)
+class ColorHistogramDescriptor1D(HistogramDescriptor1D):
+    def __init__(self, color_space: str, bins: int = 256):
+        super().__init__(bins)
+        self.color_space = color_space
 
     @overrides
     def preprocess_image(self, image: Image) -> np.array:
-        return np.array(image)
+        return np.array(image.convert(self.color_space))
 
-
-class HSVHistogramDescriptor1D(HistogramDescriptor1D):
     @overrides
     def compute(self, image: Image) -> np.array:
-        image = image.convert("HSV")
-
-        hsv_histograms = []
-        hue_channel, saturation_channel, value_channel = image.split()
-        hsv_histograms.append(super().compute(hue_channel))
-        hsv_histograms.append(super().compute(saturation_channel))
-        hsv_histograms.append(super().compute(value_channel))
-        return np.concatenate(hsv_histograms)
-
-    @overrides
-    def preprocess_image(self, image: Image) -> np.array:
-        return np.array(image)
-
-# TODO: Add CieLab, YCbCr, ...
+        processed_input_image = self.preprocess_image(image)
+        assert processed_input_image.ndim == 3, "Image should be (channels, H, W)"
+        channels = np.split(processed_input_image, processed_input_image.shape[2], axis=2)
+        histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
+        return np.concatenate(histograms)
