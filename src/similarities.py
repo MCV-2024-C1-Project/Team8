@@ -1,6 +1,5 @@
 import numpy as np
 
-
 class SimilarityMeasure:
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         pass
@@ -27,8 +26,15 @@ class ChiSquaredDistance(SimilarityMeasure):
 
 class HistogramIntersection(SimilarityMeasure):
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
-        min_vals = np.minimum(query_descriptors[:, np.newaxis, :], database_descriptors[np.newaxis, :, :])
-        return np.sum(min_vals, axis=2)
+        # Normalize histograms
+        query_normalized = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
+        database_normalized = database_descriptors / np.sum(database_descriptors, axis=1, keepdims=True)
+        
+        # Calculate intersection
+        min_vals = np.minimum(query_normalized[:, np.newaxis, :], database_normalized[np.newaxis, :, :])
+        intersection = np.sum(min_vals, axis=2)
+        
+        return -intersection
 
 class HellingerKernel(SimilarityMeasure):
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
@@ -40,4 +46,4 @@ class HellingerKernel(SimilarityMeasure):
         database_sqrt = np.sqrt(database_descriptors)
         differences = query_sqrt[:, np.newaxis, :] - database_sqrt[np.newaxis, :, :]
         squared_differences = np.sum(differences ** 2, axis=2)
-        return np.exp(-squared_differences / 2)
+        return 1-np.exp(-squared_differences / 2)
