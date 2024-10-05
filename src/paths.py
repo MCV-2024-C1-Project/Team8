@@ -12,6 +12,8 @@ assert BBDD_PATH.exists()
 
 # W1
 QSD1_W1_PATH = DATA_PATH / "qsd1_w1"
+QST1_W1_PATH = DATA_PATH / "qst1_w1"
 GT_QSD1_W1_PATH = QSD1_W1_PATH / "gt_corresps.pkl"
 assert QSD1_W1_PATH.exists()
+assert QST1_W1_PATH.exists()
 assert GT_QSD1_W1_PATH.exists()

@@ -42,8 +42,8 @@ class ColorHistogramDescriptor1D(HistogramDescriptor1D):
         processed_input_image = self.preprocess_image(image)
         assert processed_input_image.ndim == 3, "Image should be (channels, H, W)"
         channels = np.split(processed_input_image, processed_input_image.shape[2], axis=2)
-        if self.color_space == 'LAB':
-            channels = [channels[1], channels[2]]  # A and B channels
+        #if self.color_space == 'LAB':
+        #    channels = [channels[1], channels[2]]  # A and B channels
         histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
         return np.concatenate(histograms)
 

@@ -1,10 +1,14 @@
 import numpy as np
+import abc
+from overrides import overrides
 
-class SimilarityMeasure:
+class SimilarityMeasure(abc.ABC):
+    @abc.abstractmethod
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         pass
 
 class MSE(SimilarityMeasure):
+    @overrides
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         # Compute pairwise squared differences
         differences = query_descriptors[:, np.newaxis, :] - database_descriptors[np.newaxis, :, :]
@@ -14,27 +18,31 @@ class MSE(SimilarityMeasure):
         return squared_diff.mean(axis=2)
 
 class L1Distance(SimilarityMeasure):
+    @overrides
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         differences = query_descriptors[:, np.newaxis, :] - database_descriptors[np.newaxis, :, :]
         return np.abs(differences).sum(axis=2)
     
 class Bhattacharyya(SimilarityMeasure):
-    def computes(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
+    @overrides
+    def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         # Normalize histograms
         query_normalized = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
         database_normalized = database_descriptors / np.sum(database_descriptors, axis=1, keepdims=True)
 
         # This uses the fact that Bhattacharyya distance is defined as:
-        distances = -np.log(np.sum(np.sqrt(query_descriptors[:, np.newaxis, :] * database_descriptors[np.newaxis, :, :]), axis=2))
+        distances = -np.log(np.sum(np.sqrt(query_normalized[:, np.newaxis, :] * database_normalized[np.newaxis, :, :]), axis=2))
         return distances
 
 class ChiSquaredDistance(SimilarityMeasure):
+    @overrides
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         differences = query_descriptors[:, np.newaxis, :] - database_descriptors[np.newaxis, :, :]
         sum_ = query_descriptors[:, np.newaxis, :] + database_descriptors[np.newaxis, :, :]
         return 0.5 * np.sum((differences ** 2) / (sum_ + 1e-10), axis=2)
 
 class HistogramIntersection(SimilarityMeasure):
+    @overrides
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         # Normalize histograms
         query_normalized = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
@@ -47,6 +55,7 @@ class HistogramIntersection(SimilarityMeasure):
         return -intersection
 
 class HellingerKernel(SimilarityMeasure):
+    @overrides
     def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
         # Normalize
         query_descriptors = query_descriptors / np.sum(query_descriptors, axis=1, keepdims=True)
