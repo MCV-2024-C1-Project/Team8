@@ -3,7 +3,7 @@ import numpy as np
 
 class MeanAveragePrecisionAtK():
     ##################################################################################################################
-    #####EXTRACTED FROM : https://github.com/benhamner/Metrics/blob/master/Python/ml_metrics/average_precision.py#####
+    #### EXTRACTED FROM : https://github.com/benhamner/Metrics/blob/master/Python/ml_metrics/average_precision.py ####
     ##################################################################################################################
 
     def __apk(self, actual, predicted, k=10):
