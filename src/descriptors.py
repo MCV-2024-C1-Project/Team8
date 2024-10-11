@@ -101,7 +101,7 @@ class ColorHistogramDescriptor3D(HistogramDescriptor):
             range=((0, 255), (0, 255), (0, 255))
         )
 
-        return hist_3d
+        return hist_3d.ravel()
 
 
 class MultiColorSpaceHistogramDescriptor1D(ColorHistogramDescriptor1D):
