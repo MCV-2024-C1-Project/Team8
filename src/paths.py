@@ -21,3 +21,12 @@ assert QSD1_W1_PATH.exists()
 assert QST1_W1_PATH.exists()
 assert GT_QSD1_W1_PATH.exists()
 assert WEEK_1_RESULTS_PATH.exists()
+
+
+# W2
+WEEK_2_PATH = PROJECT_ROOT_PATH / "WEEK_2"
+WEEK_2_RESULTS_PATH = WEEK_2_PATH / "results"
+assert WEEK_1_PATH.exists()
+assert WEEK_2_RESULTS_PATH.exists()
+
+

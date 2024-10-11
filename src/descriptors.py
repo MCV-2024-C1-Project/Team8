@@ -3,7 +3,7 @@ import numpy as np
 from PIL import Image
 from overrides import overrides
 
-class HistogramDescriptor1D(abc.ABC):
+class HistogramDescriptor(abc.ABC):
     def __init__(self, bins: int = 256, histogram_type: str = "default"):
         self._bins = bins
         self.histogram_type = histogram_type  # 'default', 'normalized', 'cumulative', 'log-chromatic'
@@ -44,7 +44,7 @@ class HistogramDescriptor1D(abc.ABC):
         histogram = self.compute_histogram(processed_input_image)
         return histogram
 
-class GreyScaleHistogramDescriptor1D(HistogramDescriptor1D):
+class GreyScaleHistogramDescriptor1D(HistogramDescriptor):
     def __init__(self, bins: int = 256, histogram_type: str = "default"):
         super().__init__(bins, histogram_type)
 
@@ -53,7 +53,7 @@ class GreyScaleHistogramDescriptor1D(HistogramDescriptor1D):
         return np.array(image.convert('L'))
 
 
-class ColorHistogramDescriptor1D(HistogramDescriptor1D):
+class ColorHistogramDescriptor1D(HistogramDescriptor):
     def __init__(self, color_space: str, bins: int = 256, histogram_type: str = "default"):
         super().__init__(bins, histogram_type)
         self.color_space = color_space
@@ -72,10 +72,36 @@ class ColorHistogramDescriptor1D(HistogramDescriptor1D):
         processed_input_image = self.preprocess_image(image)
         assert processed_input_image.ndim == 3, "Image should be (channels, H, W)"
         channels = np.split(processed_input_image, processed_input_image.shape[2], axis=2)
-        #if self.color_space == 'LAB':
-        #    channels = [channels[1], channels[2]]  # A and B channels
+
         histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
         return np.concatenate(histograms)
+
+class ColorHistogramDescriptor3D(HistogramDescriptor):
+    def __init__(self, color_space: str, bins: int = 256, histogram_type: str = "default"):
+        super().__init__(bins, histogram_type)
+        self.color_space = color_space
+
+    @property
+    @overrides
+    def name(self):
+        return f"{super().name}_{self.color_space}"
+
+    @overrides
+    def preprocess_image(self, image: Image) -> np.array:
+        return np.array(image.convert(self.color_space))
+
+    @overrides
+    def compute(self, image: Image) -> np.array:
+        processed_input_image = self.preprocess_image(image)
+        assert processed_input_image.ndim == 3, "Image should be (channels, H, W)"
+
+        hist_3d, edges = np.histogramdd(
+            processed_input_image.reshape(-1, 3),
+            bins=self._bins,
+            range=((0, 255), (0, 255), (0, 255))
+        )
+
+        return hist_3d
 
 
 class MultiColorSpaceHistogramDescriptor1D(ColorHistogramDescriptor1D):
