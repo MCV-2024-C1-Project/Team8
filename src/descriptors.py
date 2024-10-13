@@ -76,33 +76,22 @@ class ColorHistogramDescriptor1D(HistogramDescriptor):
         histograms = [np.histogram(channel, bins=self._bins, range=(0, self._bins))[0] for channel in channels]
         return np.concatenate(histograms)
 
-class ColorHistogramDescriptor3D(HistogramDescriptor):
+class ColorHistogramDescriptor3D(ColorHistogramDescriptor1D):
     def __init__(self, color_space: str, bins: int = 256, histogram_type: str = "default"):
-        super().__init__(bins, histogram_type)
-        self.color_space = color_space
-
-    @property
-    @overrides
-    def name(self):
-        return f"{super().name}_{self.color_space}"
-
-    @overrides
-    def preprocess_image(self, image: Image) -> np.array:
-        return np.array(image.convert(self.color_space))
+        super().__init__(color_space, bins, histogram_type)
 
     @overrides
     def compute(self, image: Image) -> np.array:
         processed_input_image = self.preprocess_image(image)
         assert processed_input_image.ndim == 3, "Image should be (channels, H, W)"
 
-        hist_3d, edges = np.histogramdd(
+        hist_3d, _ = np.histogramdd(
             processed_input_image.reshape(-1, 3),
             bins=self._bins,
             range=((0, 255), (0, 255), (0, 255))
         )
 
         return hist_3d.ravel()
-
 
 class MultiColorSpaceHistogramDescriptor1D(ColorHistogramDescriptor1D):
     def __init__(self, color_spaces: list[str], bins: int = 256, histogram_type: str = "default"):
@@ -124,5 +113,28 @@ class MultiColorSpaceHistogramDescriptor1D(ColorHistogramDescriptor1D):
 
             histograms = [self.compute_histogram(channel.squeeze()) for channel in channels]
             all_histograms.append(np.concatenate(histograms))
+
+        return np.concatenate(all_histograms)
+
+
+class MultiColorSpaceHistogramDescriptor3D(MultiColorSpaceHistogramDescriptor1D):
+    def __init__(self, color_spaces: list[str], bins: int = 256, histogram_type: str = "default"):
+        super().__init__(color_spaces, bins, histogram_type)
+
+    @overrides
+    def compute(self, image: Image) -> np.array:
+        all_histograms = []
+
+        for color_space in self.color_spaces:
+            processed_input_image = self.preprocess_image(image, color_space)
+            assert processed_input_image.ndim == 3, f"Image in color space {color_space} should be (H, W, C)"
+
+            hist_3d, _ = np.histogramdd(
+                processed_input_image.reshape(-1, 3),
+                bins=self._bins,
+                range=((0, 255), (0, 255), (0, 255))
+            )
+
+            all_histograms.append(hist_3d.ravel())
 
         return np.concatenate(all_histograms)

@@ -37,7 +37,6 @@ GT_FRAMES_QSD2_W2_PATH = QSD2_W2_PATH / "gt_corresps.pkl"
 WEEK_2_RESULTS_PATH = WEEK_2_PATH / "results"
 
 assert WEEK_2_PATH.exists()
-assert WEEK_2_RESULTS_PATH.exists()
 assert QSD1_W2_PATH.exists()
 assert QSD2_W2_PATH.exists()
 assert GT_QSD1_W2_PATH.exists()
