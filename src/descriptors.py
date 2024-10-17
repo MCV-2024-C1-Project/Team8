@@ -2,6 +2,15 @@ import abc
 import numpy as np
 from PIL import Image
 from overrides import overrides
+import numpy as np
+from skimage.feature import local_binary_pattern
+from scipy.fftpack import dct
+import pywt
+import cv2
+
+###################################################################################################
+############################ COLOR SPACE DESCRIPTORS ##############################################
+###################################################################################################
 
 class HistogramDescriptor(abc.ABC):
     def __init__(self, bins: int = 256, histogram_type: str = "default"):
@@ -138,3 +147,55 @@ class MultiColorSpaceHistogramDescriptor3D(MultiColorSpaceHistogramDescriptor1D)
             all_histograms.append(hist_3d.ravel())
 
         return np.concatenate(all_histograms)
+
+###################################################################################################
+############################### TEXTURE DESCRIPTORS ###############################################
+###################################################################################################
+
+class TextureDescriptor:
+    def __init__(self):
+        pass
+
+    def compute(self, image: np.array):
+        raise NotImplementedError("This method should be overridden by subclasses")
+
+    @staticmethod
+    def to_grayscale(image: np.array):
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            return cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        return image
+
+class LBPDescriptor(TextureDescriptor):
+    def __init__(self, num_points, radius):
+        super().__init__()
+        self.num_points = num_points
+        self.radius = radius
+
+    def compute(self, image: np.array):
+        gray_image = self.to_grayscale(image)
+        lbp_image = local_binary_pattern(gray_image, self.num_points, self.radius, method='uniform')
+        hist, _ = np.histogram(lbp_image.ravel(), bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))
+        hist = hist.astype("float")
+        hist /= (hist.sum() + 1e-6)
+        return np.array(hist)
+
+class DCTDescriptor(TextureDescriptor):
+    def compute(self, image: np.array):
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+        return np.array(dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')).flatten()
+
+class WaveletDescriptor(TextureDescriptor):
+    def __init__(self, wavelet, level):
+        super().__init__()
+        self.wavelet = wavelet
+        self.level = level
+
+    def compute(self, image: np.array):
+        if image.ndim == 3:
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+        coeffs = pywt.wavedec2(image, wavelet=self.wavelet, level=self.level)
+        features = []
+        for coeff in coeffs:
+            features.extend(np.ravel(coeff))
+        return np.array(features)
