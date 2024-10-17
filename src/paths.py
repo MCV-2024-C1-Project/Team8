@@ -41,3 +41,21 @@ assert GT_QSD1_W2_PATH.exists()
 assert GT_QSD2_W2_PATH.exists()
 assert GT_FRAMES_QSD2_W2_PATH.exists()
 # assert WEEK_2_RESULTS_PATH.exists()
+
+# W3
+WEEK_3_PATH = PROJECT_ROOT_PATH / "WEEK_3"
+QSD1_W3_PATH = DATA_PATH / "qsd1_w3"
+QSD1_NON_AUGMENTED_W3_PATH = QSD1_W3_PATH / "non_augmented"
+QSD2_W3_PATH = DATA_PATH / "qsd2_w3"
+QSD2_NON_AUGMENTED_W3_PATH = QSD2_W3_PATH / "non_augmented"
+GT_QSD1_W3_PATH = QSD1_W3_PATH / "gt_corresps.pkl"
+GT_QSD2_W3_PATH = QSD2_W3_PATH / "gt_corresps.pkl"
+WEEK_3_RESULTS_PATH = WEEK_3_PATH / "results"
+assert WEEK_3_PATH.exists()
+assert QSD1_W3_PATH.exists()
+assert QSD1_NON_AUGMENTED_W3_PATH.exists()
+assert QSD2_W3_PATH.exists()
+assert QSD2_NON_AUGMENTED_W3_PATH.exists()
+assert GT_QSD1_W3_PATH.exists()
+assert GT_QSD2_W3_PATH.exists()
+assert WEEK_3_RESULTS_PATH.exists()

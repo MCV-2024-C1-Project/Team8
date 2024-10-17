@@ -50,3 +50,4 @@ tqdm==4.66.5
 traitlets==5.14.3
 tzdata==2024.2
 wcwidth==0.2.13
+PyWavelets
