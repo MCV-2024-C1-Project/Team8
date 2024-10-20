@@ -51,6 +51,7 @@ QSD2_NON_AUGMENTED_W3_PATH = QSD2_W3_PATH / "non_augmented"
 GT_QSD1_W3_PATH = QSD1_W3_PATH / "gt_corresps.pkl"
 GT_QSD2_W3_PATH = QSD2_W3_PATH / "gt_corresps.pkl"
 WEEK_3_RESULTS_PATH = WEEK_3_PATH / "results"
+
 assert WEEK_3_PATH.exists()
 assert QSD1_W3_PATH.exists()
 assert QSD1_NON_AUGMENTED_W3_PATH.exists()

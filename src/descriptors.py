@@ -155,6 +155,9 @@ class MultiColorSpaceHistogramDescriptor3D(MultiColorSpaceHistogramDescriptor1D)
 class TextureDescriptor:
     def __init__(self):
         pass
+    
+    # def name(self):
+    #     return self.__class__.__name__
 
     def compute(self, image: np.array):
         raise NotImplementedError("This method should be overridden by subclasses")
@@ -166,30 +169,53 @@ class TextureDescriptor:
         return image
 
 class LBPDescriptor(TextureDescriptor):
-    def __init__(self, num_points, radius):
+    def __init__(self, num_points, radius): # default values?
         super().__init__()
         self.num_points = num_points
         self.radius = radius
+        self.name = f"LBP_np_{num_points}_r_{radius}"
 
     def compute(self, image: np.array):
-        gray_image = self.to_grayscale(image)
-        lbp_image = local_binary_pattern(gray_image, self.num_points, self.radius, method='uniform')
+        grayscale_image = self.to_grayscale(image)
+        lbp_image = local_binary_pattern(grayscale_image, self.num_points, self.radius, method='uniform')
         hist, _ = np.histogram(lbp_image.ravel(), bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))
         hist = hist.astype("float")
         hist /= (hist.sum() + 1e-6)
-        return np.array(hist)
+        return hist
 
 class DCTDescriptor(TextureDescriptor):
+    def __init__(self, N = 10): # default values?
+        super().__init__()
+        self.N = N
+        self.name = f"DCT_{N}"
+
+    def zigzag_scan(self, matrix):
+        rows, cols = matrix.shape
+        zigzag = []
+        for i in range(rows + cols - 1):
+            if i % 2 == 0:
+                for j in range(max(0, i - cols + 1), min(i + 1, rows)):
+                    zigzag.append(matrix[j, i - j])
+            else:
+                for j in range(min(i, rows - 1), max(-1, i - cols), -1):
+                    if 0 <= i - j < cols:  # Ensure the index is within bounds
+                        zigzag.append(matrix[j, i - j])
+        return zigzag
+
     def compute(self, image: np.array):
         if image.ndim == 3:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
-        return np.array(dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')).flatten()
+        dct_result = dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
+        hist = np.array(self.zigzag_scan(dct_result)[:self.N])
+        return hist / np.sum(hist)  # Normalize
+
 
 class WaveletDescriptor(TextureDescriptor):
-    def __init__(self, wavelet, level):
+    def __init__(self, wavelet, level): # default values?
         super().__init__()
         self.wavelet = wavelet
         self.level = level
+        self.name = f"Wavelet_{wavelet}_lvl_{level}"
 
     def compute(self, image: np.array):
         if image.ndim == 3:
