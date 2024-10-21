@@ -169,42 +169,30 @@ class TextureDescriptor:
         return image
 
 class LBPDescriptor(TextureDescriptor):
-    def __init__(self, num_points=8, radius=1):  # Usually, num_points = 8*radius
+    def __init__(self, num_points=8, radius=1, color_space=cv2.COLOR_BGR2HLS):  # Usually, num_points = 8*radius
         super().__init__()
         self.num_points = num_points
         self.radius = radius
         self.name = f"LBP_np_{num_points}_r_{radius}"
+        self.color_space = color_space
 
     def compute(self, image: np.array):
+        image = cv2.cvtColor(image, self.color_space) if image.ndim == 3 else image
 
-        if image.ndim == 3: 
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
-        
-        hist = np.histogram(local_binary_pattern(image, self.num_points, self.radius, method='uniform').ravel(),
-                         bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))[0]
-        
-        return hist / (hist.sum() + 1e-6) # norm
+        descriptors = []
+        for c in range(image.ndim):
+            lbp = local_binary_pattern(image[:, :, c], self.num_points, self.radius, method='uniform').ravel()
+            hist = np.histogram(lbp.ravel(), bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))[0].astype(float)
+            hist /= (np.sum(hist.astype(float)) + 1e-8)  
+            descriptors.append(hist / (np.sum(hist)+1e-8))  
+        return np.concatenate(descriptors)
 
-        # color?
-
-        hsl_image = cv2.cvtColor(image, cv2.COLOR_BGR2HLS) # make color_space a variable ?
-        channels = cv2.split(hsl_image)
-
-        hist = np.concatenate([
-            np.histogram(local_binary_pattern(ch, self.num_points, self.radius, method='uniform').ravel(),
-                         bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))[0]
-            for ch in channels
-        ])
-
-        hist /= (hist.sum() + 1e-6) # norm
-    
-        return hist
-    
 class DCTDescriptor(TextureDescriptor):
-    def __init__(self, N = 10): # 1, 3, 6, 10, 15, 21, 28, 36, 45, 55
+    def __init__(self, N = 10, color_space=cv2.COLOR_BGR2HLS): 
         super().__init__()
         self.N = N
         self.name = f"DCT_{N}"
+        self.color_space = color_space
 
     def zigzag_scan(self, matrix):
         rows, cols = matrix.shape
@@ -220,39 +208,34 @@ class DCTDescriptor(TextureDescriptor):
         return zigzag
 
     def compute(self, image: np.array):
-        if image.ndim == 3:
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
-        dct_result = dct(dct(image, axis=0, norm='ortho'), axis=1, norm='ortho')
-        hist = np.array(self.zigzag_scan(dct_result)[:self.N])
-        return hist / np.sum(hist)  # Normalize
+        image = cv2.cvtColor(image, self.color_space) if image.ndim == 3 else image
+
+        descriptors = []
+        for c in range(image.ndim): 
+            dct_result = dct(dct(image[:, :, c], axis=0, norm='ortho'), axis=1, norm='ortho')
+            desc = np.array(self.zigzag_scan(dct_result)[:self.N])
+            descriptors.append(desc / (np.sum(desc)+1e-8))  # Normalize each channel's descriptor
+
+        return np.concatenate(descriptors)
 
 
 class WaveletDescriptor(TextureDescriptor):
-    def __init__(self, wavelet='haar', level=None, N=28): # 1, 3, 6, 10, 15, 21, 28, 36, 45, 55
+    def __init__(self, wavelet='haar', level=5, color_space=cv2.COLOR_BGR2HLS): 
         super().__init__()
         self.wavelet = wavelet
-        self.level = None
-        self.N = N
+        self.level = 4
         self.name = f"Wavelet_{wavelet}_lvl_{level}"
-
-    def zigzag_scan(self, matrix):
-        rows, cols = matrix.shape
-        zigzag = []
-        for i in range(rows + cols - 1):
-            if i % 2 == 0:
-                for j in range(max(0, i - cols + 1), min(i + 1, rows)):
-                    zigzag.append(matrix[j, i - j])
-            else:
-                for j in range(min(i, rows - 1), max(-1, i - cols), -1):
-                    if 0 <= i - j < cols:  # Ensure the index is within bounds
-                        zigzag.append(matrix[j, i - j])
-        return zigzag
+        self.color_space = color_space
 
     def compute(self, image: np.array):
-        if image.ndim == 3: 
-            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+        image = cv2.cvtColor(image, self.color_space) if image.ndim == 3 else image
+        descriptors = []
+        for c in range(image.ndim):
+            coeffs = pywt.wavedec2(image[:, :, c], wavelet=self.wavelet, level=self.level)[0].flatten()
 
-        coeffs = pywt.wavedec2(image, wavelet=self.wavelet, level=self.level)
-        
-        hist = np.array(self.zigzag_scan(coeffs)[:self.N])
-        return hist / np.sum(hist)  # Normalize
+            hist = np.histogram(coeffs, bins=256, range=(0, np.max(coeffs) + 1e-8))[0].astype(float)
+            hist = hist / (np.sum(hist) + 1e-8)  # Normalize histogram
+
+            descriptors.append(hist / (np.sum(hist)+1e-8)) # norm
+
+        return np.concatenate(descriptors)
