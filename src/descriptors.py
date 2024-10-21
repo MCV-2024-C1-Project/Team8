@@ -169,7 +169,7 @@ class TextureDescriptor:
         return image
 
 class LBPDescriptor(TextureDescriptor):
-    def __init__(self, num_points, radius): # default values?
+    def __init__(self, num_points=8, radius=1): # default values?
         super().__init__()
         self.num_points = num_points
         self.radius = radius
@@ -184,7 +184,7 @@ class LBPDescriptor(TextureDescriptor):
         return hist
 
 class DCTDescriptor(TextureDescriptor):
-    def __init__(self, N = 10): # default values?
+    def __init__(self, N = 10): 
         super().__init__()
         self.N = N
         self.name = f"DCT_{N}"
