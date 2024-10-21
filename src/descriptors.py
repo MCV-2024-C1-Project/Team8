@@ -169,22 +169,39 @@ class TextureDescriptor:
         return image
 
 class LBPDescriptor(TextureDescriptor):
-    def __init__(self, num_points=8, radius=1): # default values?
+    def __init__(self, num_points=8, radius=1):  # Usually, num_points = 8*radius
         super().__init__()
         self.num_points = num_points
         self.radius = radius
         self.name = f"LBP_np_{num_points}_r_{radius}"
 
     def compute(self, image: np.array):
-        grayscale_image = self.to_grayscale(image)
-        lbp_image = local_binary_pattern(grayscale_image, self.num_points, self.radius, method='uniform')
-        hist, _ = np.histogram(lbp_image.ravel(), bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))
-        hist = hist.astype("float")
-        hist /= (hist.sum() + 1e-6)
-        return hist
 
+        if image.ndim == 3: 
+            image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+        
+        hist = np.histogram(local_binary_pattern(image, self.num_points, self.radius, method='uniform').ravel(),
+                         bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))[0]
+        
+        return hist / (hist.sum() + 1e-6) # norm
+
+        # color?
+
+        hsl_image = cv2.cvtColor(image, cv2.COLOR_BGR2HLS) # make color_space a variable ?
+        channels = cv2.split(hsl_image)
+
+        hist = np.concatenate([
+            np.histogram(local_binary_pattern(ch, self.num_points, self.radius, method='uniform').ravel(),
+                         bins=np.arange(0, self.num_points + 3), range=(0, self.num_points + 2))[0]
+            for ch in channels
+        ])
+
+        hist /= (hist.sum() + 1e-6) # norm
+    
+        return hist
+    
 class DCTDescriptor(TextureDescriptor):
-    def __init__(self, N = 10): 
+    def __init__(self, N = 10): # 1, 3, 6, 10, 15, 21, 28, 36, 45, 55
         super().__init__()
         self.N = N
         self.name = f"DCT_{N}"
@@ -211,17 +228,31 @@ class DCTDescriptor(TextureDescriptor):
 
 
 class WaveletDescriptor(TextureDescriptor):
-    def __init__(self, wavelet, level): # default values?
+    def __init__(self, wavelet='haar', level=None, N=28): # 1, 3, 6, 10, 15, 21, 28, 36, 45, 55
         super().__init__()
         self.wavelet = wavelet
-        self.level = level
+        self.level = None
+        self.N = N
         self.name = f"Wavelet_{wavelet}_lvl_{level}"
 
+    def zigzag_scan(self, matrix):
+        rows, cols = matrix.shape
+        zigzag = []
+        for i in range(rows + cols - 1):
+            if i % 2 == 0:
+                for j in range(max(0, i - cols + 1), min(i + 1, rows)):
+                    zigzag.append(matrix[j, i - j])
+            else:
+                for j in range(min(i, rows - 1), max(-1, i - cols), -1):
+                    if 0 <= i - j < cols:  # Ensure the index is within bounds
+                        zigzag.append(matrix[j, i - j])
+        return zigzag
+
     def compute(self, image: np.array):
-        if image.ndim == 3:
+        if image.ndim == 3: 
             image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)[:, :, 0]
+
         coeffs = pywt.wavedec2(image, wavelet=self.wavelet, level=self.level)
-        features = []
-        for coeff in coeffs:
-            features.extend(np.ravel(coeff))
-        return np.array(features)
+        
+        hist = np.array(self.zigzag_scan(coeffs)[:self.N])
+        return hist / np.sum(hist)  # Normalize
