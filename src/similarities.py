@@ -1,6 +1,7 @@
 import numpy as np
 import abc
 from overrides import overrides
+from scipy.spatial import distance
 
 
 class SimilarityMeasure(abc.ABC):
@@ -74,3 +75,12 @@ class HellingerKernel(SimilarityMeasure):
         differences = query_sqrt[:, np.newaxis, :] - database_sqrt[np.newaxis, :, :]
         squared_differences = np.sum(differences ** 2, axis=2)
         return 1 - np.exp(-squared_differences / 2)
+    
+class CosineSimilarity(SimilarityMeasure):
+    @overrides
+    def compute(self, query_descriptors: np.array, database_descriptors: np.array) -> np.array:
+        squeezed_array1 = np.squeeze(query_descriptors)  
+        squeezed_array2 = np.squeeze(database_descriptors)
+        cosine_dist_matrix = distance.cdist(squeezed_array1, squeezed_array2, metric='cosine')
+        return cosine_dist_matrix
+    
