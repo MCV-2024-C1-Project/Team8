@@ -220,25 +220,37 @@ class DCTDescriptor(TextureDescriptor):
 
 
 class WaveletDescriptor(TextureDescriptor):
-    def __init__(self, wavelet='haar', level=5, color_space=cv2.COLOR_BGR2HLS): 
+    def __init__(self, wavelet='haar', N = 10, color_space=cv2.COLOR_BGR2HLS): 
         super().__init__()
         self.wavelet = wavelet
-        self.level = 4
-        self.name = f"Wavelet_{wavelet}_lvl_{level}"
+        self.N = N
+        self.name = f"Wavelet_{wavelet}_N_{self.N}"
         self.color_space = color_space
+
+    def zigzag_scan(self, matrix):
+        rows, cols = matrix.shape
+        zigzag = []
+        for i in range(rows + cols - 1):
+            if i % 2 == 0:
+                for j in range(max(0, i - cols + 1), min(i + 1, rows)):
+                    zigzag.append(matrix[j, i - j])
+            else:
+                for j in range(min(i, rows - 1), max(-1, i - cols), -1):
+                    if 0 <= i - j < cols:  # Ensure the index is within bounds
+                        zigzag.append(matrix[j, i - j])
+        return zigzag
+
 
     def compute(self, image: np.array):
         image = cv2.cvtColor(image, self.color_space) if image.ndim == 3 else image
         descriptors = []
         for c in range(image.ndim):
-            coeffs = pywt.wavedec2(image[:, :, c], wavelet=self.wavelet, level=self.level)[0].flatten()
-
-            hist = np.histogram(coeffs, bins=256, range=(0, np.max(coeffs) + 1e-8))[0].astype(float)
-            hist = hist / (np.sum(hist) + 1e-8)  # Normalize histogram
-
-            descriptors.append(hist / (np.sum(hist)+1e-8)) # norm
-
+            coeffs = pywt.wavedec2(image[:,:,c], wavelet='haar')
+            arr, _ = pywt.coeffs_to_array(coeffs)
+            # arr = (arr - arr.min()) / (arr.max() - arr.min()+1e-8)
+            descriptors.append(np.array(self.zigzag_scan(arr)[:self.N]))
         return np.concatenate(descriptors)
+
     
     
 class GaborDescriptor(TextureDescriptor):
@@ -247,7 +259,7 @@ class GaborDescriptor(TextureDescriptor):
         self.wavelengths = wavelengths
         self.orientations = orientations
         self.sigma = sigma
-        self.name = f"Gabor_wavelengths_{wavelengths}_orientations_{len(orientations)}"
+        self.name = f"Gabor_wavelengths_{wavelengths}_orientations_{len(orientations)}".replace('[', '(').replace(']', ')')
         self.color_space = color_space
 
     def compute(self, image: np.array):
