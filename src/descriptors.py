@@ -239,3 +239,40 @@ class WaveletDescriptor(TextureDescriptor):
             descriptors.append(hist / (np.sum(hist)+1e-8)) # norm
 
         return np.concatenate(descriptors)
+    
+    
+class GaborDescriptor(TextureDescriptor):
+    def __init__(self, wavelengths=[3, 5, 7], orientations=[0, np.pi/4, np.pi/2,  3*np.pi/4], sigma=2,color_space= cv2.COLOR_BGR2GRAY):
+        super().__init__()
+        self.wavelengths = wavelengths
+        self.orientations = orientations
+        self.sigma = sigma
+        self.name = f"Gabor_wavelengths_{wavelengths}_orientations_{len(orientations)}"
+        self.color_space = color_space
+
+    def compute(self, image: np.array):
+        """Compute Gabor features for the given image block."""
+        image = cv2.cvtColor(image, self.color_space)
+        features = []
+
+        for wavelength in self.wavelengths:
+            for orientation in self.orientations:
+                # Create Gabor kernel using OpenCV
+                gabor_kernel = cv2.getGaborKernel(ksize=(31, 31), 
+                                                   sigma=self.sigma, 
+                                                   theta=orientation, 
+                                                   lambd=wavelength, 
+                                                   gamma=1, 
+                                                   psi=0)
+
+                # Convolve image with Gabor kernel
+                filtered = cv2.filter2D(image, cv2.CV_32F, gabor_kernel)
+
+                # Compute the mean and standard deviation of the filtered image
+                mean = np.mean(filtered)
+                stddev = np.std(filtered)
+                features.append(mean)
+                features.append(stddev)
+
+        return np.array(features)
+
