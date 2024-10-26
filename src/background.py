@@ -133,7 +133,7 @@ def get_painting_side_masks(image: Image) -> (np.ndarray, np.ndarray):
     return left_mask, right_mask
 
 
-def inpaint_mask(mask: np.ndarray, crop_side: str) -> np.ndarray:
+def inpaint_mask(mask: np.ndarray, crop_side: str, n_margin_cols: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
     """
     Fill gaps in a binary mask by identifying edges of the painting and filling the area between them.
     Adjusts fill range based on whether the painting touches the left or right side of the mask.
@@ -176,9 +176,9 @@ def inpaint_mask(mask: np.ndarray, crop_side: str) -> np.ndarray:
     col_start, col_end = filled_cols.min(), filled_cols.max()
 
     # Handle cases where the painting reaches the side boundaries
-    if crop_side == "left" and filled_mask[(row_fill_ratios > row_threshold), -1].any():
+    if crop_side == "left" and mask[(row_fill_ratios > row_threshold), -1].any():
         col_end = filled_mask.shape[1]  # Fill to the right edge if painting touches the right side
-    elif crop_side == "right" and filled_mask[(row_fill_ratios > row_threshold), 0].any():
+    elif crop_side == "right" and mask[(row_fill_ratios > row_threshold), -0].any():
         col_start = 0  # Fill to the left edge if painting touches the left side
 
     # Fill the inpaint area within detected boundaries
@@ -193,7 +193,7 @@ def inpaint_mask(mask: np.ndarray, crop_side: str) -> np.ndarray:
     return filled_mask
 
 
-def fill_painting_mask(mask: np.ndarray, side: str, n_margin_cols: int = 10, n_margin_rows: int = 10) -> np.ndarray:
+def fill_painting_mask(mask: np.ndarray, side: str, n_margin_cols: int = 10, n_margin_rows: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
     """
     Fills the mask of a painting by keeping only the largest connected components
     and clearing margins based on specified side.
@@ -231,7 +231,7 @@ def fill_painting_mask(mask: np.ndarray, side: str, n_margin_cols: int = 10, n_m
 
     # Mask for the largest connected components
     largest_components_mask = np.isin(labels, indices).astype(np.uint8) * 255
-    filled_largest_components_mask = inpaint_mask(largest_components_mask, side)
+    filled_largest_components_mask = inpaint_mask(largest_components_mask, side, n_margin_cols, min_pctg_col)
 
     return filled_largest_components_mask
 
@@ -280,7 +280,7 @@ def correct_vertical_transition_in_concatenated_mask(mask: np.ndarray) -> np.nda
     return corrected_mask
 
 
-def get_painting_masks(image: Image, n_margin_cols: int = 10, n_margin_rows: int = 10) -> np.ndarray:
+def get_painting_masks(image: Image, n_margin_cols: int = 10, n_margin_rows: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
     """
     Generates a concatenated mask of a painting image by processing the left and right sides separately,
     filling the masks, and applying vertical transition correction if necessary.
@@ -303,14 +303,16 @@ def get_painting_masks(image: Image, n_margin_cols: int = 10, n_margin_rows: int
     left_mask, right_mask = get_painting_side_masks(image)
 
     # Fill the painting masks for each side
-    filled_left_mask = fill_painting_mask(left_mask, side="left", n_margin_cols=n_margin_cols, n_margin_rows=n_margin_rows)
-    filled_right_mask = fill_painting_mask(right_mask, side="right", n_margin_cols=n_margin_cols, n_margin_rows=n_margin_rows)
+    filled_left_mask = fill_painting_mask(left_mask, side="left", n_margin_cols=n_margin_cols,
+                                          n_margin_rows=n_margin_rows, min_pctg_col=min_pctg_col)
+    filled_right_mask = fill_painting_mask(right_mask, side="right", n_margin_cols=n_margin_cols,
+                                           n_margin_rows=n_margin_rows, min_pctg_col=min_pctg_col)
 
     # Concatenate the filled masks along the horizontal axis
     concatenated_mask = np.concatenate((filled_left_mask, filled_right_mask), axis=1)
 
     # Apply vertical transition correction if there is overlap between left and right masks at the boundary
-    if filled_left_mask[:, -1].any() or filled_right_mask[:, 0].any():
+    if filled_left_mask[:, -1].any() and filled_right_mask[:, 0].any():
         concatenated_mask = correct_vertical_transition_in_concatenated_mask(concatenated_mask)
 
     return concatenated_mask
