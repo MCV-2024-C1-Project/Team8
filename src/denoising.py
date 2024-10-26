@@ -98,8 +98,7 @@ class NonLinearFilters(ColorSpaceImageDenoiser):
         ]))
 
 
-def denoise_image(image: Image, denoising_filter, color_space='RGB') -> Image:
-    denoiser = NonLinearFilters(color_space=color_space) if denoising_filter in NonLinearFilters.__dict__.values() else LinearFilters(color_space=color_space)
+def denoise_image(image: Image, denoising_filter=NonLinearFilters().median_filter) -> Image:
     img_np = np.array(image)
-    result = denoising_filter(denoiser, img_np)  # Pass denoiser instance as self
+    result = denoising_filter(img_np)  # Pass denoiser instance as self
     return Image.fromarray(result, 'RGB')
