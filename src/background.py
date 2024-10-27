@@ -319,23 +319,39 @@ def get_painting_masks(image: Image, n_margin_cols: int = 10, n_margin_rows: int
 
 
 def crop_image_by_mask(image, mask):
+    """
+    Crops and orders contours from a binary mask of an image, ensuring that contours
+    are returned from left to right based on their leftmost x-coordinate. Contours
+    with height or width equal to 1 are ignored.
+
+    Parameters:
+    -----------
+    image : PIL.Image
+        Input RGB image to be cropped based on the mask.
+    mask : np.ndarray
+        Binary mask where the contours are detected and ordered.
+
+    Returns:
+    --------
+    list of PIL.Image
+        List of cropped images from the input image, corresponding to each contour
+        in the mask, ordered from left to right.
+    """
     image = np.array(image)
     mask = (mask > 0).astype(np.uint8)
-    num_labels, labels_im = cv2.connectedComponents(mask)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cropped_images = []
 
-    for label in range(1, num_labels):
-        component_mask = np.zeros_like(mask)
-        component_mask[labels_im == label] = 1
-        contours, _ = cv2.findContours(component_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Process each contour
+    valid_contours = []
+    for contour in contours:
+        x, y, w, h = cv2.boundingRect(contour)
+        if w > 1 and h > 1:  # Ignore small contours with w or h of 1
+            cropped_image = image[y:y + h, x:x + w]
+            valid_contours.append((x, Image.fromarray(cropped_image)))
 
-        # Check if contours are found
-        if contours:
-            x, y, w, h = cv2.boundingRect(contours[0])
+    # Sort by the x-coordinate to ensure left-to-right order
+    valid_contours.sort(key=lambda comp: comp[0])
 
-            # Check if the width and height are greater than 10 pixels
-            if w > 10 and h > 10:
-                cropped_image = image[y:y + h, x:x + w]
-                cropped_images.append(Image.fromarray(cropped_image))
-
-    return cropped_images
+    # Return only the cropped images
+    return [comp[1] for comp in valid_contours]
