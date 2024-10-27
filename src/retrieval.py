@@ -8,7 +8,8 @@ from tqdm import tqdm
 from src.descriptors import GaborDescriptor
 from src.paths import WEEK_3_RESULTS_PATH
 from src.similarities import CosineSimilarity
-
+import shutil
+import os
 
 def split_image_into_blocks(image: Image, num_blocks: int) -> list[Image]:
     width, height = image.size
@@ -20,11 +21,13 @@ def split_image_into_blocks(image: Image, num_blocks: int) -> list[Image]:
 
 
 def process_image_partitions(output_path: Path, image_list: list[Image],
-                             partition_levels: list[int], mode: str = 'auto'
+                             partition_levels: list[int], mode: str = 'auto',
                              ) -> dict[int, list[list[Image]]]:
     partitioned_images = {level: [] for level in partition_levels}
     for level in partition_levels:
         level_output_dir = output_path.with_name(f"{output_path.stem}_level_{level}{output_path.suffix}")
+        if mode == 'compute_notsave' and os.path.isdir(level_output_dir):
+            shutil.rmtree(level_output_dir)
 
         if mode != 'compute' and level_output_dir.exists():
             for idx in tqdm(range(len(image_list)), desc=f"Loading images at level {level}"):
@@ -127,8 +130,16 @@ def find_top_k_similar_images(query_images: list[Image], db_images: list[Image],
                               k: int = 5, level: int = 5,
                               descriptor = GaborDescriptor(), similarity_metric: CosineSimilarity = CosineSimilarity()
                               ) -> list[list[int]]:
-    flattened_query_images = [img for sublist in query_images for img in sublist]
-    positions = [i for i, sublist in enumerate(query_images) for _ in sublist]
+
+    if any(isinstance(sublist, list) for sublist in query_images):
+        flattened_query_images = [img for sublist in query_images for img in sublist]
+    else:
+        flattened_query_images = query_images
+
+    if any(isinstance(sublist, list) for sublist in query_images):
+        positions = [i for i, sublist in enumerate(query_images) for _ in sublist]
+    else:
+        positions = list(range(len(query_images)))
 
     query_partitions = process_image_partitions(WEEK_3_RESULTS_PATH / f"query_partitions",
                                                 flattened_query_images, [level], mode="compute_notsave")

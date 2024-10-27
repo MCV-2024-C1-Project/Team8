@@ -2,3 +2,4 @@
 venv/
 __pycache__/
 partitioned_*/
+*_partitions_level_*/
