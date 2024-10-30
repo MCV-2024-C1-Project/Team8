@@ -64,3 +64,17 @@ assert GT_QSD2_W3_PATH.exists()
 assert WEEK_3_RESULTS_PATH.exists()
 assert QST1_W3_PATH.exists()
 assert QST2_W3_PATH.exists()
+
+# W4
+WEEK_4_PATH = PROJECT_ROOT_PATH / "WEEK_4"
+QSD1_W4_PATH = DATA_PATH / "qsd1_w4"
+QSD1_NON_AUGMENTED_W4_PATH = QSD1_W4_PATH / "non_augmented"
+AUGMENTATIONS_QSD1_W4_PATH = QSD1_W4_PATH / "augmentations.pkl"
+FRAMES_QSD1_W4_PATH = QSD1_W4_PATH / "frames.pkl"
+GT_QSD1_W4_PATH = QSD1_W4_PATH / "gt_corresps.pkl"
+assert WEEK_4_PATH.exists()
+assert QSD1_W4_PATH.exists()
+assert QSD1_NON_AUGMENTED_W4_PATH.exists()
+assert AUGMENTATIONS_QSD1_W4_PATH.exists()
+assert FRAMES_QSD1_W4_PATH.exists()
+assert GT_QSD1_W4_PATH.exists()
