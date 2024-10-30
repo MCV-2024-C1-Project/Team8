@@ -72,9 +72,11 @@ QSD1_NON_AUGMENTED_W4_PATH = QSD1_W4_PATH / "non_augmented"
 AUGMENTATIONS_QSD1_W4_PATH = QSD1_W4_PATH / "augmentations.pkl"
 FRAMES_QSD1_W4_PATH = QSD1_W4_PATH / "frames.pkl"
 GT_QSD1_W4_PATH = QSD1_W4_PATH / "gt_corresps.pkl"
+WEEK_4_RESULTS_PATH = WEEK_4_PATH / "results"
 assert WEEK_4_PATH.exists()
 assert QSD1_W4_PATH.exists()
 assert QSD1_NON_AUGMENTED_W4_PATH.exists()
 assert AUGMENTATIONS_QSD1_W4_PATH.exists()
 assert FRAMES_QSD1_W4_PATH.exists()
 assert GT_QSD1_W4_PATH.exists()
+assert WEEK_4_RESULTS_PATH.exists()
