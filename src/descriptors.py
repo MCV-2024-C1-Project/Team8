@@ -298,35 +298,18 @@ class GaborDescriptor(TextureDescriptor):
 ############################### KEYPOINT DESCRIPTORS ##############################################
 ###################################################################################################
 
-
 class SIFTDescriptor:
     def __init__(self, max_features=500):
-        """
-        Initialize the SIFT descriptor with a limit on the number of keypoints.
-        Args:
-            max_features (int): Maximum number of keypoints to retain.
-        """
-        self.sift = cv2.SIFT_create()
+        self.sift = cv2.SIFT_create() # arguments !
         self.max_features = max_features
 
     def compute(self, image):
-        """
-        Compute SIFT descriptors for an image with filtering by response score.
-        Args:
-            image (np.ndarray): Input image.
-        Returns:
-            keypoints (list): List of filtered keypoints.
-            descriptors (np.ndarray): Array of filtered SIFT descriptors.
-        """
-        # Detect all keypoints and compute descriptors
         keypoints, descriptors = self.sift.detectAndCompute(image, None)
-
-        # Sort keypoints by response and keep only the top N
         if len(keypoints) > self.max_features:
             keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)[:self.max_features]
             descriptors = descriptors[:self.max_features]
-
         return keypoints, descriptors
+
 
 class ORBDescriptor:
     def __init__(self):
@@ -334,9 +317,10 @@ class ORBDescriptor:
 
     def compute(self, image):
         if not isinstance(image, np.ndarray):
-            raise ValueError("Input image is not a valid numpy array.")
+            raise ValueError("Input image is not valid.")
         keypoints, descriptors = self.orb.detectAndCompute(image, None)
         return keypoints, descriptors
+
 
 class HOGDescriptor:
     def __init__(self):
@@ -348,7 +332,6 @@ class HOGDescriptor:
             x, y = int(kp.pt[0]), int(kp.pt[1])
             patch = self._extract_patch(image, x, y)
             if patch is not None:
-                # Resize the patch to 64x128, standard size for HOG
                 patch_resized = cv2.resize(patch, (64, 128))
                 hog_descriptor = self.hog.compute(patch_resized)
                 hog_descriptors.append(hog_descriptor.flatten())
@@ -363,166 +346,84 @@ class HOGDescriptor:
 
 class ImageRetrievalSystem:
     def __init__(self, descriptors, descriptor_path):
-        """
-        Initialize the image retrieval system.
-        Args:
-            descriptors (dict): A dictionary of descriptor name to descriptor instance.
-            descriptor_path (str): The path where descriptors will be saved.
-        """
-        self.descriptors = descriptors  # Dictionary like {'SIFT': SIFTDescriptor(), 'ORB': ORBDescriptor(), 'HOG': HOGDescriptor()}
+        self.descriptors = descriptors
         self.descriptor_path = Path(descriptor_path)
         self.descriptor_path.mkdir(parents=True, exist_ok=True)
 
     def compute_descriptors(self, image, descriptor_name):
-        """
-        Compute descriptors for a single image using the specified descriptor.
-        Args:
-            image (np.ndarray): The image to compute descriptors for.
-            descriptor_name (str): The name of the descriptor to use (e.g., 'SIFT', 'ORB', 'HOG').
-        Returns:
-            np.ndarray: Computed descriptors for the image.
-        """
         if not isinstance(image, np.ndarray):
-            raise ValueError("Input image is not a valid numpy array.")
-
+            raise ValueError("Input image is not valid.")
+        
         descriptor = self.descriptors.get(descriptor_name)
         if descriptor is None:
             raise ValueError(f"Descriptor {descriptor_name} not found.")
 
+        # What if there is a HOG desc. and no SIFT ?
         if descriptor_name == 'HOG':
-            # Compute SIFT keypoints and use them for HOG if required
             keypoints = self.descriptors['SIFT'].compute(image)[0]
-            hog_descriptors = descriptor.compute(image, keypoints)
-            return hog_descriptors if hog_descriptors is not None else np.array([])
+            return descriptor.compute(image, keypoints) if keypoints else np.array([])
         else:
-            keypoints, descriptors = descriptor.compute(image)
-            return descriptors if descriptors is not None else np.array([])
+            return descriptor.compute(image)[1] if descriptor.compute(image)[1] is not None else np.array([])
 
     def load_museum_descriptors(self, museum_images_np, descriptor_name):
-        """
-        Load or compute descriptors for museum images for a specific descriptor.
-        Args:
-            museum_images_np (list): List of museum images as numpy arrays.
-            descriptor_name (str): The name of the descriptor to load or compute.
-        Returns:
-            list: List of descriptors for each museum image.
-        """
         descriptor_file = self.descriptor_path / f"{descriptor_name}_descriptors.pkl"
 
-        # Load from file if it exists and matches the number of images
         if descriptor_file.exists():
-            print(f"Loading precomputed {descriptor_name} descriptors...")
             with open(descriptor_file, 'rb') as file:
                 museum_descriptors = pickle.load(file)
             if len(museum_descriptors) == len(museum_images_np):
                 return museum_descriptors
-            else:
-                print(
-                    f"Descriptor file found, but not all descriptors are present. Recomputing missing descriptors for {descriptor_name}.")
 
-        # Compute descriptors if they are missing or partially computed
-        museum_descriptors = []
-        for img in tqdm(museum_images_np, desc=f"Computing {descriptor_name} Descriptors", leave=False):
-            museum_descriptors.append(self.compute_descriptors(img, descriptor_name))
-
-        # Save the computed descriptors
+        museum_descriptors = [self.compute_descriptors(img, descriptor_name) for img in tqdm(museum_images_np, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
         with open(descriptor_file, 'wb') as file:
             pickle.dump(museum_descriptors, file)
-
         return museum_descriptors
 
     def match_images(self, query_desc, museum_desc, descriptor_name):
-        """
-        Match query and museum descriptors using the specified descriptor and compute a score.
-        Args:
-            query_desc (np.ndarray): Query descriptors.
-            museum_desc (np.ndarray): Museum descriptors.
-            descriptor_name (str): The descriptor to use for matching.
-        Returns:
-            float: The matching score.
-        """
         if query_desc.size == 0 or museum_desc.size == 0:
             return np.inf
 
-        # Use vectorized distance calculation with cdist for efficiency
         metric = 'hamming' if descriptor_name == 'ORB' else 'euclidean'
         distances = cdist(query_desc, museum_desc, metric=metric)
+        return np.mean(np.min(distances, axis=1))
 
-        # Take the minimum distance for each query descriptor and compute the mean
-        min_distances = np.min(distances, axis=1)
-        return np.mean(min_distances)
+    def retrieve_similar_images(self, query_images, museum_images, K, descriptor_name, t=0.99):
 
-    def retrieve_similar_images(self, query_images, museum_images, K, descriptor_name):
-        """
-        Retrieve the top K similar image indices for each sub-image in query images using an adaptive "elbow" method
-        based on score gaps.
-
-        Args:
-            query_images (list): List of lists of query images as PIL Images.
-            museum_images (list): List of museum images as PIL Images.
-            K (int): Maximum number of similar images to retrieve.
-            descriptor_name (str): The descriptor to use for matching (e.g., 'SIFT', 'ORB', 'HOG').
-
-        Returns:
-            list: A list where each element corresponds to a query image and is itself a list of sub-lists, where
-                  each sub-list contains the top similar image indices for each sub-image in the query.
-                  If no good match is found for a sub-image, the list contains `-1`.
-            list: A list of the initial gaps between the first two scores for each sub-image.
-        """
-        # Convert museum images to numpy arrays once
         museum_images_np = [np.array(image) for image in museum_images]
-
-        # Load or compute museum descriptors for the chosen descriptor
         museum_descriptors = self.load_museum_descriptors(museum_images_np, descriptor_name)
-        print(f"Loaded {len(museum_descriptors)} museum descriptors.")
 
-        gap_0 = []  # Store the first gaps for analysis
-        results = []  # Store final results for each query image
-        print(f"Processing query images with {descriptor_name}...")
-
+        results, gap_0 = [], []
+        i = 0
         for query_set in tqdm(query_images, desc="Query Sets"):
-            query_results = []  # Results for each sub-image in the current query image
-
+            query_results = []
             for query_image in query_set:
-                # Convert and compute descriptors for the current sub-image
-                query_image_np = np.array(query_image)
-                query_desc = self.compute_descriptors(query_image_np, descriptor_name)
-                scores = []
+                query_image = np.array(query_image)
 
-                # Calculate similarity scores for each museum image and store with index
-                for museum_idx, museum_desc in enumerate(museum_descriptors):
-                    score = self.match_images(query_desc, museum_desc, descriptor_name)
-                    scores.append((museum_idx, score))  # Store (index, score)
+                query_desc = self.compute_descriptors(query_image, descriptor_name)
 
-                # Retrieve and sort top K matches by score in ascending order
+                scores = [(museum_idx, self.match_images(query_desc, museum_desc, descriptor_name)) 
+                        for museum_idx, museum_desc in enumerate(museum_descriptors)]
                 top_k_matches = nsmallest(K, scores, key=lambda x: x[1])
                 top_k_indices = [index for index, score in top_k_matches]
                 top_k_scores = [score for index, score in top_k_matches]
 
-                # Calculate gaps between consecutive scores
-                gaps = np.diff(top_k_scores)  # Consecutive differences between sorted scores
-                if len(gaps) > 0:
-                    gap_0.append([top_k_indices, gaps])  # Store the first gap for analysis
+                gaps = np.diff(top_k_scores)
+                gap_0.append([top_k_indices, gaps])
 
-                # Determine the largest gap for potential cutoff
-                if len(gaps) > 0:
-                    largest_gap_index = np.argmax(gaps) + 1  # +1 to get the index in top_k_scores after the gap
+                first_distance = top_k_scores[0]
+                second_distance = top_k_scores[1]
+
+                # print(i, first_distance / second_distance, top_k_indices, top_k_scores, sep='\n')
+
+                # This method looks like the best for k = 1, implement another method for k>1 ?
+                if first_distance < t * second_distance:
+                    result_indices = top_k_indices
                 else:
-                    largest_gap_index = 1  # If only one score, consider it a strong match
-
-                # Define a dynamic threshold based on the gap distribution
-                threshold = np.mean(gaps) + np.std(gaps) * 0.5
-
-                # Determine the indices to keep based on the largest gap
-                if largest_gap_index == 1 and gaps[0] > threshold:
-                    # If the largest gap is after the first score and it's significantly larger than others
-                    result_indices = top_k_indices  # Only the best match is returned
-                else:
-                    # Keep indices up to the position of the largest gap
                     result_indices = [-1]
 
-                query_results.append(result_indices)  # Store results for the current sub-image
+                query_results.append(result_indices)
+                i += 1
 
-            results.append(query_results)  # Store results for the current query image (with multiple sub-images)
+            results.append(query_results)
 
         return results, gap_0
