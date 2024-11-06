@@ -298,9 +298,9 @@ class GaborDescriptor(TextureDescriptor):
 ############################### KEYPOINT DESCRIPTORS ##############################################
 ###################################################################################################
 
-class SIFTDescriptor:
+class SIFTDescriptor: # Scale Invariant Feature Transform
     def __init__(self, max_features=500):
-        self.sift = cv2.SIFT_create() # arguments !
+        self.sift = cv2.SIFT_create()
         self.max_features = max_features
 
     def compute(self, image):
@@ -311,7 +311,7 @@ class SIFTDescriptor:
         return keypoints, descriptors
 
 
-class ORBDescriptor:
+class ORBDescriptor: # (FAST + BRIEF)...
     def __init__(self):
         self.orb = cv2.ORB_create()
 
@@ -321,27 +321,42 @@ class ORBDescriptor:
         keypoints, descriptors = self.orb.detectAndCompute(image, None)
         return keypoints, descriptors
 
+class HOGDescriptor: # Histogram Oriented Gradients; NO KEYPOINTS
+    def __init__(self, win_size=(256, 256), block_size=(16, 16), block_stride=(8,8), cell_size=(8,8), num_bins=9):
+        self.hog = cv2.HOGDescriptor(win_size, block_size, block_stride, cell_size, num_bins)
 
-class HOGDescriptor:
-    def __init__(self):
-        self.hog = cv2.HOGDescriptor()
+    def compute(self, image):
+        if len(image.shape) > 2:
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        resized_image = cv2.resize(image, (256, 256))
+        cv2.imwrite('/WEEK_4/results/a.png', resized_image)
+        
+        descriptors = self.hog.compute(resized_image)
+        descriptors = descriptors.reshape(-1, self.hog.nbins)
+        
+        return descriptors
 
-    def compute(self, image, keypoints):
-        hog_descriptors = []
-        for kp in keypoints:
-            x, y = int(kp.pt[0]), int(kp.pt[1])
-            patch = self._extract_patch(image, x, y)
-            if patch is not None:
-                patch_resized = cv2.resize(patch, (64, 128))
-                hog_descriptor = self.hog.compute(patch_resized)
-                hog_descriptors.append(hog_descriptor.flatten())
-        return np.array(hog_descriptors)
 
-    def _extract_patch(self, image, x, y, size=64):
-        half_size = size // 2
-        if x - half_size < 0 or y - half_size < 0 or x + half_size > image.shape[1] or y + half_size > image.shape[0]:
-            return None
-        return image[y-half_size:y+half_size, x-half_size:x+half_size]
+# class HOGDescriptor:
+#     def __init__(self):
+#         self.hog = cv2.HOGDescriptor()
+
+#     def compute(self, image, keypoints):
+#         hog_descriptors = []
+#         for kp in keypoints:
+#             x, y = int(kp.pt[0]), int(kp.pt[1])
+#             patch = self._extract_patch(image, x, y)
+#             if patch is not None:
+#                 patch_resized = cv2.resize(patch, (64, 128))
+#                 hog_descriptor = self.hog.compute(patch_resized)
+#                 hog_descriptors.append(hog_descriptor.flatten())
+#         return np.array(hog_descriptors)
+
+#     def _extract_patch(self, image, x, y, size=64):
+#         half_size = size // 2
+#         if x - half_size < 0 or y - half_size < 0 or x + half_size > image.shape[1] or y + half_size > image.shape[0]:
+#             return None
+#         return image[y-half_size:y+half_size, x-half_size:x+half_size]
 
 
 class ImageRetrievalSystem:
@@ -357,8 +372,12 @@ class ImageRetrievalSystem:
         descriptor = self.descriptors.get(descriptor_name)
         if descriptor is None:
             raise ValueError(f"Descriptor {descriptor_name} not found.")
+        
+        descriptors = descriptor.compute(image)
+        if len(descriptors)==2:
+            keypoints, descriptors = descriptors
+        return descriptors
 
-        # What if there is a HOG desc. and no SIFT ?
         if descriptor_name == 'HOG':
             keypoints = self.descriptors['SIFT'].compute(image)[0]
             return descriptor.compute(image, keypoints) if keypoints else np.array([])
@@ -382,9 +401,13 @@ class ImageRetrievalSystem:
     def match_images(self, query_desc, museum_desc, descriptor_name):
         if query_desc.size == 0 or museum_desc.size == 0:
             return np.inf
-
-        metric = 'hamming' if descriptor_name == 'ORB' else 'euclidean'
-        distances = cdist(query_desc, museum_desc, metric=metric)
+        metric = "euclidean"
+        if descriptor_name == 'HOG':
+            min_len = min(query_desc.shape[0], museum_desc.shape[0])
+            query_desc, museum_desc = query_desc.flatten()[:min_len], museum_desc.flatten()[:min_len]
+            distances = cdist(query_desc.reshape(1, -1), museum_desc.reshape(1, -1), metric)
+        else:
+            distances = cdist(query_desc, museum_desc, metric=metric)
         return np.mean(np.min(distances, axis=1))
 
     def retrieve_similar_images(self, query_images, museum_images, K, descriptor_name, t=0.99):
@@ -413,7 +436,7 @@ class ImageRetrievalSystem:
                 first_distance = top_k_scores[0]
                 second_distance = top_k_scores[1]
 
-                # print(i, first_distance / second_distance, top_k_indices, top_k_scores, sep='\n')
+                print(i, first_distance / second_distance, top_k_indices, top_k_scores, sep='\n')
 
                 # This method looks like the best for k = 1, implement another method for k>1 ?
                 if first_distance < t * second_distance:
