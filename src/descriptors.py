@@ -2,7 +2,7 @@ import abc
 from PIL import Image
 from overrides import overrides
 import numpy as np
-from skimage.feature import local_binary_pattern
+from skimage.feature import local_binary_pattern, hog
 from scipy.fftpack import dct
 import pywt
 import cv2
@@ -12,6 +12,7 @@ from heapq import nsmallest
 from tqdm import tqdm
 import pickle
 from pathlib import Path
+
 
 
 ###################################################################################################
@@ -321,42 +322,28 @@ class ORBDescriptor: # (FAST + BRIEF)...
         keypoints, descriptors = self.orb.detectAndCompute(image, None)
         return keypoints, descriptors
 
-class HOGDescriptor: # Histogram Oriented Gradients; NO KEYPOINTS
-    def __init__(self, win_size=(256, 256), block_size=(16, 16), block_stride=(8,8), cell_size=(8,8), num_bins=9):
-        self.hog = cv2.HOGDescriptor(win_size, block_size, block_stride, cell_size, num_bins)
+class HOGDescriptor:
+    def __init__(self, pixels_per_cell=8, cells_per_block=2, win_size=256):
+        self.pixels_per_cell = (pixels_per_cell, pixels_per_cell)
+        self.cells_per_block = (cells_per_block, cells_per_block)
+        self.win_size = (win_size, win_size)
 
     def compute(self, image):
-        if len(image.shape) > 2:
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         resized_image = cv2.resize(image, (256, 256))
-        cv2.imwrite('/WEEK_4/results/a.png', resized_image)
+
+        descriptors = hog(
+            resized_image,
+            orientations=9,
+            pixels_per_cell=self.pixels_per_cell,
+            cells_per_block=self.cells_per_block,
+            block_norm='L2-Hys',
+            transform_sqrt=True,
+            feature_vector=True
+        )
         
-        descriptors = self.hog.compute(resized_image)
-        descriptors = descriptors.reshape(-1, self.hog.nbins)
-        
-        return descriptors
-
-
-# class HOGDescriptor:
-#     def __init__(self):
-#         self.hog = cv2.HOGDescriptor()
-
-#     def compute(self, image, keypoints):
-#         hog_descriptors = []
-#         for kp in keypoints:
-#             x, y = int(kp.pt[0]), int(kp.pt[1])
-#             patch = self._extract_patch(image, x, y)
-#             if patch is not None:
-#                 patch_resized = cv2.resize(patch, (64, 128))
-#                 hog_descriptor = self.hog.compute(patch_resized)
-#                 hog_descriptors.append(hog_descriptor.flatten())
-#         return np.array(hog_descriptors)
-
-#     def _extract_patch(self, image, x, y, size=64):
-#         half_size = size // 2
-#         if x - half_size < 0 or y - half_size < 0 or x + half_size > image.shape[1] or y + half_size > image.shape[0]:
-#             return None
-#         return image[y-half_size:y+half_size, x-half_size:x+half_size]
+        return descriptors.astype(np.float32)
 
 
 class ImageRetrievalSystem:
@@ -376,97 +363,118 @@ class ImageRetrievalSystem:
         descriptors = descriptor.compute(image)
         if len(descriptors)==2:
             keypoints, descriptors = descriptors
+
         return descriptors
 
-        if descriptor_name == 'HOG':
-            keypoints = self.descriptors['SIFT'].compute(image)[0]
-            return descriptor.compute(image, keypoints) if keypoints else np.array([])
-        else:
-            return descriptor.compute(image)[1] if descriptor.compute(image)[1] is not None else np.array([])
-
-    def load_museum_descriptors(self, museum_images_np, descriptor_name):
+    def load_museum_descriptors(self, museum_images, descriptor_name):
         descriptor_file = self.descriptor_path / f"{descriptor_name}_descriptors.pkl"
 
         if descriptor_file.exists():
             with open(descriptor_file, 'rb') as file:
                 museum_descriptors = pickle.load(file)
-            if len(museum_descriptors) == len(museum_images_np):
+            if len(museum_descriptors) == len(museum_images):
                 return museum_descriptors
 
-        museum_descriptors = [self.compute_descriptors(img, descriptor_name) for img in tqdm(museum_images_np, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
+        museum_descriptors = [self.compute_descriptors(img, descriptor_name) for img in tqdm(museum_images, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
         with open(descriptor_file, 'wb') as file:
             pickle.dump(museum_descriptors, file)
         return museum_descriptors
 
-    def match_images(self, query_desc, museum_desc, descriptor_name):
-        if query_desc.size == 0 or museum_desc.size == 0:
-            return np.inf
-        metric = "euclidean"
-        if descriptor_name == 'HOG':
-            min_len = min(query_desc.shape[0], museum_desc.shape[0])
-            query_desc, museum_desc = query_desc.flatten()[:min_len], museum_desc.flatten()[:min_len]
-            distances = cdist(query_desc.reshape(1, -1), museum_desc.reshape(1, -1), metric)
-        else:
-            distances = cdist(query_desc, museum_desc, metric=metric)
-        return np.mean(np.min(distances, axis=1))
-    
-    def count_good_matches(self, query_descriptors, museum_descriptors, distance_threshold=30):
-        good_match_counts = []
-        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+    def _get_flann(self):
+        # FLANN parameters
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)  # or pass empty dictionary
 
-        for museum_desc in museum_descriptors:
-            if museum_desc.shape == (0,):
-                match_count = 0
+        flann = cv2.FlannBasedMatcher(index_params, search_params)
+        return flann
+
+
+    def retrieve_similar_images(self, descriptor_name, museum_images, query_images, gt_list = None, K=1):
+        results = []
+        flann = self._get_flann()
+
+        if gt_list == None:
+            gt_list = [-2] * len(query_images)
+
+        museum_descriptors = self.load_museum_descriptors(museum_images, descriptor_name)
+
+        for idx, (query_images, gt_tuple) in enumerate(zip(query_images, gt_list)):
+            print(f"Query {idx}")
+            query_result = []
+            for img_idx, image in enumerate(query_images):
+                print(f" - Image {img_idx}")
+                query_descriptor = self.compute_descriptors(np.array(image), descriptor_name)
+
+                threshold = 0.03 if descriptor_name[:3]=='HOG' else 0.2
+                metric = 'knn' if descriptor_name[:4]=='SIFT' else 'euclidean'
+
+                img_results = self._get_img_results(query_descriptor, museum_descriptors, flann, metric)
+                best_candidate = self._determine_best_candidate(img_results, query_descriptor, museum_descriptors, flann, K, metric, threshold)
+                # print(best_candidate)
+                if best_candidate[0][1] < 0.1:
+                    best_candidate = [(-1, 1)]
+                query_result.append(best_candidate)
+
+                # Print and compare with ground truth
+                print(f" Results : {query_result[img_idx][0]}")
+                if gt_list[0] != -2:
+                    print(f" GT : {gt_tuple[img_idx]}")
+                    if query_result[img_idx][0][0] != gt_tuple[img_idx]:
+                        print("Mismatch detected")
+                print("############\n\n")
+            results.append(query_result)
+
+        return results
+
+    def _compute_similarity(self, descriptor1, descriptor2, flann=None, metric='euclidean'):
+        if metric=='euclidean':
+            similarity = 1 - np.linalg.norm(descriptor1 - descriptor2) / np.linalg.norm(descriptor1 + descriptor2)
+            return similarity
+        if metric=='knn':
+            matches = flann.knnMatch(descriptor1, descriptor2, k=2)
+            good = [m for m, n in matches if m.distance < 0.75 * n.distance]
+            similarity_score = len(good) / len(matches) if matches else 0
+            return similarity_score
+            
+    def _get_img_results(self, query_descriptor, museum_descriptors, flann, reverse=False, metric='euclidean'):
+        img_results = []
+        for museum_idx, db_descriptor in tqdm(enumerate(museum_descriptors)):
+            if db_descriptor is None:
+                continue
+            if reverse:
+                similarity_score = self._compute_similarity(db_descriptor, query_descriptor, flann, metric)
             else:
-                matches = bf.match(query_descriptors, museum_desc)
-                good_matches = [m for m in matches if m.distance < distance_threshold]
-                match_count = len(good_matches)
+                similarity_score = self._compute_similarity(query_descriptor, db_descriptor, flann, metric)
+            
+            img_results.append((museum_idx, similarity_score))
+        img_results.sort(key=lambda x: x[1], reverse=True)
+        return img_results
 
-            good_match_counts.append(match_count)
-        return good_match_counts
 
-    def retrieve_similar_images(self, query_images, museum_images, K, descriptor_name, t=0.99):
+    def _determine_best_candidate(self, img_results, query_descriptor, museum_descriptors, flann=None, K=1, metric='euclidean', threshold = 0.2):
+        if len(img_results) > 1:
+            top_score = img_results[0][1]
+            second_score = img_results[1][1]
+            relative_gap = (top_score - second_score) / top_score if top_score != 0 else 0
+            print("   - Relative gap: ", relative_gap)
+            ambiguous = relative_gap < threshold
+        else:
+            ambiguous = False
 
-        museum_images_np = [np.array(image) for image in museum_images]
-        museum_descriptors = self.load_museum_descriptors(museum_images_np, descriptor_name)
-
-        results, gap_0 = [], []
-        i = 0
-        for query_set in tqdm(query_images, desc="Query Sets"):
-            query_results = []
-            for query_image in query_set:
-                query_image = np.array(query_image)
-
-                query_desc = self.compute_descriptors(query_image, descriptor_name)
-                good_match_counts = self.count_good_matches(query_desc, museum_descriptors, distance_threshold=30)
-
-                if max(good_match_counts) < 5:
-                    result_indices = [-1]
+        if ambiguous:
+            print("Ambiguous result detected")
+            reverse_results = self._get_img_results(query_descriptor, museum_descriptors, flann, True, metric)
+            reverse_top_score = reverse_results[0][1]
+            if (reverse_top_score - second_score) / reverse_top_score >= threshold:
+                if reverse_top_score > top_score:
+                    best_candidate = reverse_results[:K]
                 else:
-                    scores = [(museum_idx, self.match_images(query_desc, museum_desc, descriptor_name)) 
-                            for museum_idx, museum_desc in enumerate(museum_descriptors)]
-                    top_k_matches = nsmallest(K, scores, key=lambda x: x[1])
-                    top_k_indices = [index for index, score in top_k_matches]
-                    top_k_scores = [score for index, score in top_k_matches]
+                    best_candidate = img_results[:K]
+            else:
+                print("Detected as not found")
+                best_candidate = [(-1, 1)]  # Mark as ambiguous
+        else:
+            best_candidate = img_results[:K] if img_results else [(-1, 1)]
+        return best_candidate
 
-                    gaps = np.diff(top_k_scores)
-                    gap_0.append([top_k_indices, gaps])
-                    result_indices = top_k_indices
-                '''
-                    first_distance = top_k_scores[0]
-                    second_distance = top_k_scores[1]
-
-                print(i, first_distance / second_distance, top_k_indices, top_k_scores, sep='\n')
-
-                # This method looks like the best for k = 1, implement another method for k>1 ?
-                if first_distance < t * second_distance:
-                    result_indices = top_k_indices
-                else:
-                    result_indices = [-1]
-                '''
-                query_results.append(result_indices)
-                i += 1
-
-            results.append(query_results)
-
-        return results, gap_0
