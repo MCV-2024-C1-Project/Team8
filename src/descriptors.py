@@ -305,9 +305,9 @@ class SIFTDescriptor: # Scale Invariant Feature Transform
 
     def compute(self, image):
         keypoints, descriptors = self.sift.detectAndCompute(image, None)
-        if len(keypoints) > self.max_features:
+        '''if len(keypoints) > self.max_features:
             keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)[:self.max_features]
-            descriptors = descriptors[:self.max_features]
+            descriptors = descriptors[:self.max_features]'''
         return keypoints, descriptors
 
 
