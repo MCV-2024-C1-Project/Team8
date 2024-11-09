@@ -1,9 +1,27 @@
 import numpy as np
+import cv2
+from tqdm import tqdm
 
-def retrieve_similar_images(sift, flann, cropped_query_image_list_d1, gt_list, museum_descriptors, K=1):
+def get_flann():
+    # FLANN parameters
+    FLANN_INDEX_KDTREE = 1
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)  # or pass empty dictionary
+
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    return flann
+
+def retrieve_similar_images(sift, museum_images, query_images, gt_list = None, K=1):
     results = []
+    flann = get_flann()
+
+    if gt_list == None:
+        gt_list = [-2] * len(query_images)
+
+    museum_descriptors = [sift.compute(np.array(museum_img)) for museum_img in tqdm(museum_images, "Computing museum descriptors")]
+
     print(f"\nRetrieving similar images using SIFT descriptor:")
-    for idx, (query_images, gt_tuple) in enumerate(zip(cropped_query_image_list_d1, gt_list)):
+    for idx, (query_images, gt_tuple) in enumerate(zip(query_images, gt_list)):
         print(f"Query {idx}")
         query_result = []
         for img_idx, image in enumerate(query_images):
@@ -19,9 +37,10 @@ def retrieve_similar_images(sift, flann, cropped_query_image_list_d1, gt_list, m
 
             # Print and compare with ground truth
             print(f" Results : {query_result[img_idx][0]}")
-            print(f" GT : {gt_tuple[img_idx]}")
-            if query_result[img_idx][0][0] != gt_tuple[img_idx]:
-                print("Mismatch detected")
+            if gt_list[0] != -2:
+                print(f" GT : {gt_tuple[img_idx]}")
+                if query_result[img_idx][0][0] != gt_tuple[img_idx]:
+                    print("Mismatch detected")
             print("############\n\n")
         results.append(query_result)
 
@@ -40,7 +59,7 @@ def compute_similarity(descriptor1, descriptor2, flann):
 
 def get_img_results(query_descriptor, museum_descriptors, flann, reverse=False):
     img_results = []
-    for museum_idx, db_descriptor in enumerate(museum_descriptors):
+    for museum_idx, db_descriptor in tqdm(enumerate(museum_descriptors)):
         if db_descriptor[1] is None:
             continue
 
