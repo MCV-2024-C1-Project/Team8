@@ -409,6 +409,21 @@ class ImageRetrievalSystem:
         else:
             distances = cdist(query_desc, museum_desc, metric=metric)
         return np.mean(np.min(distances, axis=1))
+    
+    def count_good_matches(self, query_descriptors, museum_descriptors, distance_threshold=30):
+        good_match_counts = []
+        bf = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
+
+        for museum_desc in museum_descriptors:
+            if museum_desc.shape == (0,):
+                match_count = 0
+            else:
+                matches = bf.match(query_descriptors, museum_desc)
+                good_matches = [m for m in matches if m.distance < distance_threshold]
+                match_count = len(good_matches)
+
+            good_match_counts.append(match_count)
+        return good_match_counts
 
     def retrieve_similar_images(self, query_images, museum_images, K, descriptor_name, t=0.99):
 
@@ -423,18 +438,23 @@ class ImageRetrievalSystem:
                 query_image = np.array(query_image)
 
                 query_desc = self.compute_descriptors(query_image, descriptor_name)
+                good_match_counts = self.count_good_matches(query_desc, museum_descriptors, distance_threshold=30)
 
-                scores = [(museum_idx, self.match_images(query_desc, museum_desc, descriptor_name)) 
-                        for museum_idx, museum_desc in enumerate(museum_descriptors)]
-                top_k_matches = nsmallest(K, scores, key=lambda x: x[1])
-                top_k_indices = [index for index, score in top_k_matches]
-                top_k_scores = [score for index, score in top_k_matches]
+                if max(good_match_counts) < 5:
+                    result_indices = [-1]
+                else:
+                    scores = [(museum_idx, self.match_images(query_desc, museum_desc, descriptor_name)) 
+                            for museum_idx, museum_desc in enumerate(museum_descriptors)]
+                    top_k_matches = nsmallest(K, scores, key=lambda x: x[1])
+                    top_k_indices = [index for index, score in top_k_matches]
+                    top_k_scores = [score for index, score in top_k_matches]
 
-                gaps = np.diff(top_k_scores)
-                gap_0.append([top_k_indices, gaps])
-
-                first_distance = top_k_scores[0]
-                second_distance = top_k_scores[1]
+                    gaps = np.diff(top_k_scores)
+                    gap_0.append([top_k_indices, gaps])
+                    result_indices = top_k_indices
+                '''
+                    first_distance = top_k_scores[0]
+                    second_distance = top_k_scores[1]
 
                 print(i, first_distance / second_distance, top_k_indices, top_k_scores, sep='\n')
 
@@ -443,7 +463,7 @@ class ImageRetrievalSystem:
                     result_indices = top_k_indices
                 else:
                     result_indices = [-1]
-
+                '''
                 query_results.append(result_indices)
                 i += 1
 
