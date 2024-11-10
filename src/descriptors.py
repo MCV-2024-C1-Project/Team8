@@ -347,10 +347,15 @@ class HOGDescriptor:
 
 
 class ImageRetrievalSystem:
-    def __init__(self, descriptors, descriptor_path):
+    def __init__(self, descriptors, descriptor_path, log = False):
         self.descriptors = descriptors
         self.descriptor_path = Path(descriptor_path)
         self.descriptor_path.mkdir(parents=True, exist_ok=True)
+        self.logging = log
+
+    def log(self, data: str):
+        if self.logging:
+            print(data)
 
     def compute_descriptors(self, image, descriptor_name):
         if not isinstance(image, np.ndarray):
@@ -375,7 +380,7 @@ class ImageRetrievalSystem:
             if len(museum_descriptors) == len(museum_images):
                 return museum_descriptors
 
-        museum_descriptors = [self.compute_descriptors(img, descriptor_name) for img in tqdm(museum_images, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
+        museum_descriptors = [self.compute_descriptors(np.array(img), descriptor_name) for img in tqdm(museum_images, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
         with open(descriptor_file, 'wb') as file:
             pickle.dump(museum_descriptors, file)
         return museum_descriptors
@@ -400,32 +405,38 @@ class ImageRetrievalSystem:
         museum_descriptors = self.load_museum_descriptors(museum_images, descriptor_name)
 
         for idx, (query_images, gt_tuple) in enumerate(zip(query_images, gt_list)):
-            print(f"Query {idx}")
+            self.log(f"Query {idx}")
             query_result = []
             for img_idx, image in enumerate(query_images):
-                print(f" - Image {img_idx}")
+                self.log(f" - Image {img_idx}")
                 query_descriptor = self.compute_descriptors(np.array(image), descriptor_name)
 
                 threshold = 0.03 if descriptor_name[:3]=='HOG' else 0.2
                 metric = 'knn' if descriptor_name[:4]=='SIFT' else 'euclidean'
 
-                img_results = self._get_img_results(query_descriptor, museum_descriptors, flann, metric)
+                img_results = self._get_img_results(query_descriptor, museum_descriptors, flann, False, metric)
                 best_candidate = self._determine_best_candidate(img_results, query_descriptor, museum_descriptors, flann, K, metric, threshold)
-                # print(best_candidate)
                 if best_candidate[0][1] < 0.1:
                     best_candidate = [(-1, 1)]
                 query_result.append(best_candidate)
 
                 # Print and compare with ground truth
-                print(f" Results : {query_result[img_idx][0]}")
+                self.log(f" Results : {query_result[img_idx][0]}")
                 if gt_list[0] != -2:
-                    print(f" GT : {gt_tuple[img_idx]}")
+                    self.log(f" GT : {gt_tuple[img_idx]}")
                     if query_result[img_idx][0][0] != gt_tuple[img_idx]:
-                        print("Mismatch detected")
-                print("############\n\n")
+                        self.log("Mismatch detected")
+                self.log("############\n\n")
             results.append(query_result)
 
-        return results
+        results_idxs = []
+        for r in results:
+            temp = []
+            for sub_r in r:
+                temp.append([x[0] for x in sub_r])
+            results_idxs.append(temp)
+
+        return results_idxs
 
     def _compute_similarity(self, descriptor1, descriptor2, flann=None, metric='euclidean'):
         if metric=='euclidean':
@@ -457,13 +468,13 @@ class ImageRetrievalSystem:
             top_score = img_results[0][1]
             second_score = img_results[1][1]
             relative_gap = (top_score - second_score) / top_score if top_score != 0 else 0
-            print("   - Relative gap: ", relative_gap)
+            self.log(f"   - Relative gap: {relative_gap}")
             ambiguous = relative_gap < threshold
         else:
             ambiguous = False
 
         if ambiguous:
-            print("Ambiguous result detected")
+            self.log("Ambiguous result detected")
             reverse_results = self._get_img_results(query_descriptor, museum_descriptors, flann, True, metric)
             reverse_top_score = reverse_results[0][1]
             if (reverse_top_score - second_score) / reverse_top_score >= threshold:
@@ -472,7 +483,7 @@ class ImageRetrievalSystem:
                 else:
                     best_candidate = img_results[:K]
             else:
-                print("Detected as not found")
+                self.log("Detected as not found")
                 best_candidate = [(-1, 1)]  # Mark as ambiguous
         else:
             best_candidate = img_results[:K] if img_results else [(-1, 1)]
