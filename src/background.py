@@ -232,12 +232,12 @@ def resize_image(image: np.ndarray, image_size: int) -> np.ndarray:
 
 def get_paintings_cropped_images(
         image: Image,
-        image_size: int | None = 2 ** 9,
+        image_size: int | None = None,
         min_aspect_ratio: float = 0.125,
         max_aspect_ratio: float = 8.0,
         max_distance_to_merge: int = 10,
         sigma: float = 2.0,
-        output_size: int | None = 2 ** 9
+        output_size: int | None = None
 ) -> list[Image]:
     """
     Detects and crops rectangular regions of interest (such as paintings) from an input image. The function applies
@@ -294,6 +294,12 @@ def get_paintings_cropped_images(
 
     # Merge nearby contours using agglomerative clustering
     merged_contours = agglomerative_cluster(filtered_contours, max_distance_to_merge)
+
+    # If no contours are found, create one that matches the image dimensions
+    if len(merged_contours) == 0 or len(merged_contours) > 2:
+        h, w = image_array.shape[:2]
+        # Create a contour around the image borders
+        merged_contours = [np.array([[0, 0], [w - 1, 0], [w - 1, h - 1], [0, h - 1]])]
 
     # Sort contours if more than one exists
     if len(merged_contours) > 1:
