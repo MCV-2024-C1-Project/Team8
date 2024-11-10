@@ -306,9 +306,12 @@ class SIFTDescriptor: # Scale Invariant Feature Transform
 
     def compute(self, image):
         keypoints, descriptors = self.sift.detectAndCompute(image, None)
-        '''if len(keypoints) > self.max_features:
-            keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)[:self.max_features]
-            descriptors = descriptors[:self.max_features]'''
+        if len(keypoints) > self.max_features:
+            kp_desc = list(zip(keypoints, descriptors))
+            kp_desc.sort(key=lambda x: x[0].response, reverse=True)
+            kp_desc = kp_desc[:self.max_features]
+            keypoints, descriptors = zip(*kp_desc)
+            descriptors = np.array(descriptors)
         return keypoints, descriptors
 
 
@@ -411,7 +414,7 @@ class ImageRetrievalSystem:
                 self.log(f" - Image {img_idx}")
                 query_descriptor = self.compute_descriptors(np.array(image), descriptor_name)
 
-                threshold = 0.03 if descriptor_name[:3]=='HOG' else 0.2
+                threshold = 0.02 if descriptor_name[:3]=='HOG' else 0.1
                 metric = 'knn' if descriptor_name[:4]=='SIFT' else 'euclidean'
 
                 img_results = self._get_img_results(query_descriptor, museum_descriptors, flann, False, metric)
