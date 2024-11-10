@@ -1,12 +1,19 @@
 import abc
-import numpy as np
 from PIL import Image
 from overrides import overrides
 import numpy as np
-from skimage.feature import local_binary_pattern
+from skimage.feature import local_binary_pattern, hog
 from scipy.fftpack import dct
 import pywt
 import cv2
+from scipy.spatial.distance import cdist
+from typing import List
+from heapq import nsmallest
+from tqdm import tqdm
+import pickle
+from pathlib import Path
+
+
 
 ###################################################################################################
 ############################ COLOR SPACE DESCRIPTORS ##############################################
@@ -287,4 +294,198 @@ class GaborDescriptor(TextureDescriptor):
                 features.append(stddev)
 
         return np.array(features)
+
+###################################################################################################
+############################### KEYPOINT DESCRIPTORS ##############################################
+###################################################################################################
+
+class SIFTDescriptor: # Scale Invariant Feature Transform
+    def __init__(self, max_features=500):
+        self.sift = cv2.SIFT_create()
+        self.max_features = max_features
+
+    def compute(self, image):
+        keypoints, descriptors = self.sift.detectAndCompute(image, None)
+        '''if len(keypoints) > self.max_features:
+            keypoints = sorted(keypoints, key=lambda x: x.response, reverse=True)[:self.max_features]
+            descriptors = descriptors[:self.max_features]'''
+        return keypoints, descriptors
+
+
+class ORBDescriptor: # (FAST + BRIEF)...
+    def __init__(self):
+        self.orb = cv2.ORB_create()
+
+    def compute(self, image):
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Input image is not valid.")
+        keypoints, descriptors = self.orb.detectAndCompute(image, None)
+        return keypoints, descriptors
+
+class HOGDescriptor:
+    def __init__(self, pixels_per_cell=8, cells_per_block=2, win_size=256):
+        self.pixels_per_cell = (pixels_per_cell, pixels_per_cell)
+        self.cells_per_block = (cells_per_block, cells_per_block)
+        self.win_size = (win_size, win_size)
+
+    def compute(self, image):
+        
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        resized_image = cv2.resize(image, (256, 256))
+
+        descriptors = hog(
+            resized_image,
+            orientations=9,
+            pixels_per_cell=self.pixels_per_cell,
+            cells_per_block=self.cells_per_block,
+            block_norm='L2-Hys',
+            transform_sqrt=True,
+            feature_vector=True
+        )
+        
+        return descriptors.astype(np.float32)
+
+
+class ImageRetrievalSystem:
+    def __init__(self, descriptors, descriptor_path, log = False):
+        self.descriptors = descriptors
+        self.descriptor_path = Path(descriptor_path)
+        self.descriptor_path.mkdir(parents=True, exist_ok=True)
+        self.logging = log
+
+    def log(self, data: str):
+        if self.logging:
+            print(data)
+
+    def compute_descriptors(self, image, descriptor_name):
+        if not isinstance(image, np.ndarray):
+            raise ValueError("Input image is not valid.")
+        
+        descriptor = self.descriptors.get(descriptor_name)
+        if descriptor is None:
+            raise ValueError(f"Descriptor {descriptor_name} not found.")
+        
+        descriptors = descriptor.compute(image)
+        if len(descriptors)==2:
+            keypoints, descriptors = descriptors
+
+        return descriptors
+
+    def load_museum_descriptors(self, museum_images, descriptor_name):
+        descriptor_file = self.descriptor_path / f"{descriptor_name}_descriptors.pkl"
+
+        if descriptor_file.exists():
+            with open(descriptor_file, 'rb') as file:
+                museum_descriptors = pickle.load(file)
+            if len(museum_descriptors) == len(museum_images):
+                return museum_descriptors
+
+        museum_descriptors = [self.compute_descriptors(np.array(img), descriptor_name) for img in tqdm(museum_images, desc=f"Computing {descriptor_name} Descriptors", leave=False)]
+        with open(descriptor_file, 'wb') as file:
+            pickle.dump(museum_descriptors, file)
+        return museum_descriptors
+
+    def _get_flann(self):
+        # FLANN parameters
+        FLANN_INDEX_KDTREE = 1
+        index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+        search_params = dict(checks=50)  # or pass empty dictionary
+
+        flann = cv2.FlannBasedMatcher(index_params, search_params)
+        return flann
+
+
+    def retrieve_similar_images(self, descriptor_name, museum_images, query_images, gt_list = None, K=1):
+        results = []
+        flann = self._get_flann()
+
+        if gt_list == None:
+            gt_list = [-2] * len(query_images)
+
+        museum_descriptors = self.load_museum_descriptors(museum_images, descriptor_name)
+
+        for idx, (query_images, gt_tuple) in enumerate(zip(query_images, gt_list)):
+            self.log(f"Query {idx}")
+            query_result = []
+            for img_idx, image in enumerate(query_images):
+                self.log(f" - Image {img_idx}")
+                query_descriptor = self.compute_descriptors(np.array(image), descriptor_name)
+
+                threshold = 0.03 if descriptor_name[:3]=='HOG' else 0.2
+                metric = 'knn' if descriptor_name[:4]=='SIFT' else 'euclidean'
+
+                img_results = self._get_img_results(query_descriptor, museum_descriptors, flann, False, metric)
+                best_candidate = self._determine_best_candidate(img_results, query_descriptor, museum_descriptors, flann, K, metric, threshold)
+                if best_candidate[0][1] < 0.1:
+                    best_candidate = [(-1, 1)]
+                query_result.append(best_candidate)
+
+                # Print and compare with ground truth
+                self.log(f" Results : {query_result[img_idx][0]}")
+                if gt_list[0] != -2:
+                    self.log(f" GT : {gt_tuple[img_idx]}")
+                    if query_result[img_idx][0][0] != gt_tuple[img_idx]:
+                        self.log("Mismatch detected")
+                self.log("############\n\n")
+            results.append(query_result)
+
+        results_idxs = []
+        for r in results:
+            temp = []
+            for sub_r in r:
+                temp.append([x[0] for x in sub_r])
+            results_idxs.append(temp)
+
+        return results_idxs
+
+    def _compute_similarity(self, descriptor1, descriptor2, flann=None, metric='euclidean'):
+        if metric=='euclidean':
+            similarity = 1 - np.linalg.norm(descriptor1 - descriptor2) / np.linalg.norm(descriptor1 + descriptor2)
+            return similarity
+        if metric=='knn':
+            matches = flann.knnMatch(descriptor1, descriptor2, k=2)
+            good = [m for m, n in matches if m.distance < 0.75 * n.distance]
+            similarity_score = len(good) / len(matches) if matches else 0
+            return similarity_score
+            
+    def _get_img_results(self, query_descriptor, museum_descriptors, flann, reverse=False, metric='euclidean'):
+        img_results = []
+        for museum_idx, db_descriptor in tqdm(enumerate(museum_descriptors)):
+            if db_descriptor is None:
+                continue
+            if reverse:
+                similarity_score = self._compute_similarity(db_descriptor, query_descriptor, flann, metric)
+            else:
+                similarity_score = self._compute_similarity(query_descriptor, db_descriptor, flann, metric)
+            
+            img_results.append((museum_idx, similarity_score))
+        img_results.sort(key=lambda x: x[1], reverse=True)
+        return img_results
+
+
+    def _determine_best_candidate(self, img_results, query_descriptor, museum_descriptors, flann=None, K=1, metric='euclidean', threshold = 0.2):
+        if len(img_results) > 1:
+            top_score = img_results[0][1]
+            second_score = img_results[1][1]
+            relative_gap = (top_score - second_score) / top_score if top_score != 0 else 0
+            self.log(f"   - Relative gap: {relative_gap}")
+            ambiguous = relative_gap < threshold
+        else:
+            ambiguous = False
+
+        if ambiguous:
+            self.log("Ambiguous result detected")
+            reverse_results = self._get_img_results(query_descriptor, museum_descriptors, flann, True, metric)
+            reverse_top_score = reverse_results[0][1]
+            if (reverse_top_score - second_score) / reverse_top_score >= threshold:
+                if reverse_top_score > top_score:
+                    best_candidate = reverse_results[:K]
+                else:
+                    best_candidate = img_results[:K]
+            else:
+                self.log("Detected as not found")
+                best_candidate = [(-1, 1)]  # Mark as ambiguous
+        else:
+            best_candidate = img_results[:K] if img_results else [(-1, 1)]
+        return best_candidate
 
