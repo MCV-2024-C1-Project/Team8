@@ -39,13 +39,14 @@ def show_images(images: list[np.ndarray], n_cols: int = 3, output_file: str | Pa
 
     # Save to file if output path is provided, otherwise show plot
     if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
         plt.savefig(str(output_file), bbox_inches='tight')
         plt.close()
     else:
         plt.show()
 
 
-def show_image_with_mean_values(image_array: np.ndarray) -> None:
+def show_image_with_mean_values(image_array: np.ndarray, output_file: str | Path | None = None) -> None:
     """
     Displays an image along with the mean values of its rows and columns.
 
@@ -106,5 +107,11 @@ def show_image_with_mean_values(image_array: np.ndarray) -> None:
     ax_rows.grid(True)
     ax_rows.legend()
 
-    plt.tight_layout()  # Adjust layout
-    plt.show()  # Display the plots
+    # Save to file if output path is provided, otherwise show plot
+    plt.tight_layout()
+    if output_file is not None:
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        plt.savefig(str(output_file), bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()

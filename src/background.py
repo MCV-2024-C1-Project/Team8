@@ -1,357 +1,298 @@
+import copy
+
 import cv2
 import numpy as np
 from PIL import Image
-from skimage import filters
+from skimage import feature
 
 
-def convert_bool_to_uint8(binary_array: np.ndarray) -> np.ndarray:
+def get_edges_canny(img_array: np.ndarray, sigma=1.0, low_threshold=None, high_threshold=None,
+                    use_quantiles=False) -> np.ndarray:
     """
-    Convert a boolean array to an `uint8` array, scaling values by 255.
+    Applies Canny edge detection to each color channel of the input image and combines the edges.
 
     Parameters:
-    -----------
-    binary_array : np.ndarray
-        Input boolean array where True represents foreground and False represents background.
+    - img_array: np.ndarray - Input image array with 3 channels (RGB).
+    - sigma: float - Standard deviation of the Gaussian filter (default is 1.0).
+    - low_threshold: float or None - Low threshold for edge detection (optional).
+    - high_threshold: float or None - High threshold for edge detection (optional).
+    - use_quantiles: bool - Whether to interpret thresholds as quantiles (default is False).
 
     Returns:
-    --------
-    np.ndarray
-        Converted array in `uint8` format with values 0 (background) and 255 (foreground).
+    - np.ndarray - Binary edge image with detected edges in all channels combined.
     """
-    # Ensure the input is a boolean array
-    assert binary_array.dtype == np.bool_, "Input array must be of boolean type."
+    # Apply Canny edge detection to each channel
+    edges_r = feature.canny(img_array[:, :, 0], sigma=sigma, low_threshold=low_threshold, high_threshold=high_threshold,
+                            use_quantiles=use_quantiles)
+    edges_g = feature.canny(img_array[:, :, 1], sigma=sigma, low_threshold=low_threshold, high_threshold=high_threshold,
+                            use_quantiles=use_quantiles)
+    edges_b = feature.canny(img_array[:, :, 2], sigma=sigma, low_threshold=low_threshold, high_threshold=high_threshold,
+                            use_quantiles=use_quantiles)
 
-    return binary_array.astype(np.uint8) * 255
+    # Combine edges (logical OR)
+    edges = np.logical_or(np.logical_or(edges_r, edges_g), edges_b)
+
+    # Convert boolean to int (optional)
+    edges = edges.astype(np.uint8) * 255
+
+    return edges
 
 
-def apply_otsu_threshold(image: np.ndarray) -> np.ndarray:
+def merge_contours(contour1, contour2) -> np.ndarray:
     """
-    Apply Otsu's threshold to an image and convert the result to a binary mask
-    with values 0 and 255 (in `uint8` format).
+    Merges two contours by concatenating them and obtaining the convex hull.
 
     Parameters:
-    -----------
-    image : np.ndarray
-        Input grayscale image for thresholding, where Otsu's method will be applied.
+    - contour1: np.ndarray - First contour.
+    - contour2: np.ndarray - Second contour.
 
     Returns:
-    --------
-    np.ndarray
-        Binary mask of the image after applying Otsu's threshold, with 255 for foreground
-        and 0 for background.
+    - np.ndarray - Merged contour representing the convex hull of the two input contours.
     """
-    # Apply Otsu's threshold to create a binary mask
-    binary_mask = image > filters.threshold_otsu(image)
-    # Convert the boolean mask to uint8 and scale by 255
-    return convert_bool_to_uint8(binary_mask)
+    # Concatenate the two contours
+    combined = np.concatenate((contour1, contour2))
+    # Get the convex hull of the combined contours
+    merged_contour = cv2.convexHull(combined)
+    return merged_contour
 
 
-def get_gradient_magnitude(image: np.ndarray, kernel_size: int = 5) -> np.ndarray:
+def calculate_contour_distance(contour1, contour2, horizontal_threshold=0, vertical_threshold=0):
     """
-    Calculate the gradient magnitude of an image using a specified kernel size
-    for detecting horizontal and vertical edges.
+    Calculates the distance between two contours if they meet specified horizontal and vertical overlap thresholds.
 
     Parameters:
-    -----------
-    image : np.ndarray
-        Input grayscale image for which gradient magnitude is calculated.
-    kernel_size : int, optional
-        Size of the edge-detection kernel in one axis. Must be an odd number, default is 5
-        and generates a kernel of (5, kernel_size) in y-axis and (kernel_size, 5) in x-axis.
+    - contour1: np.ndarray - First contour.
+    - contour2: np.ndarray - Second contour.
+    - horizontal_threshold: int - Minimum horizontal overlap required (default is 0).
+    - vertical_threshold: int - Minimum vertical overlap required (default is 0).
 
     Returns:
-    --------
-    np.ndarray
-        Gradient magnitude of the input image.
-
-    Raises:
-    -------
-    ValueError
-        If `kernel_size` is not an odd integer.
+    - float - Distance between contour centers if overlap conditions are met; otherwise, infinity.
     """
-    # Ensure kernel size is an odd integer
-    assert kernel_size % 2 != 0, f"'kernel_size' must be an odd integer, instead got {kernel_size}."
+    # Get bounding rectangles for both contours
+    x1, y1, w1, h1 = cv2.boundingRect(contour1)
+    c_x1 = x1 + w1 / 2
+    c_y1 = y1 + h1 / 2
 
-    # Define kernels for different edge orientations
-    kernely = np.array([
-        [1] * kernel_size,
-        [1] * kernel_size,
-        [0] * kernel_size,
-        [-1] * kernel_size,
-        [-1] * kernel_size
-    ])  # Vertical
-    kernelx = np.copy(kernely).T  # Horizontal
+    x2, y2, w2, h2 = cv2.boundingRect(contour2)
+    c_x2 = x2 + w2 / 2
+    c_y2 = y2 + h2 / 2
 
-    # Calculate gradients
-    gradient_x = cv2.filter2D(image, cv2.CV_64F, kernelx)
-    gradient_y = cv2.filter2D(image, cv2.CV_64F, kernely)
+    # Calculate horizontal and vertical overlaps
+    horizontal_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
+    vertical_overlap = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
 
-    # Calculate gradient magnitudes
-    gradient_magnitude = np.sqrt(gradient_x ** 2 + gradient_y ** 2)
+    # Check if the horizontal and vertical overlap is above the given thresholds
+    horizontal_condition = horizontal_overlap > horizontal_threshold
+    vertical_condition = vertical_overlap > vertical_threshold
 
-    return gradient_magnitude
+    # Return distance only if both conditions are met
+    if horizontal_condition and vertical_condition:
+        return max(abs(c_x1 - c_x2) - (w1 + w2) / 2, abs(c_y1 - c_y2) - (h1 + h2) / 2)
+    else:
+        return float('inf')  # Return a large distance if the conditions aren't met
 
 
-def get_painting_side_masks(image: Image) -> (np.ndarray, np.ndarray):
+def agglomerative_cluster(contours, threshold_distance=40.0, horizontal_threshold=0, vertical_threshold=0):
     """
-    Generate binary masks for the left and right halves of a painting image by calculating
-    gradient magnitudes and applying Otsu's threshold.
+    Performs agglomerative clustering on contours based on a distance threshold.
 
     Parameters:
-    -----------
-    image : PIL.Image
-        Input RGB image of the painting to be processed.
+    - contours: list of np.ndarray - List of contours to be clustered.
+    - threshold_distance: float - Maximum distance to consider contours for merging (default is 40.0).
+    - horizontal_threshold: int - Minimum horizontal overlap required for clustering (default is 0).
+    - vertical_threshold: int - Minimum vertical overlap required for clustering (default is 0).
 
     Returns:
-    --------
-    (np.ndarray, np.ndarray)
-        Binary masks for the left and right halves of the image, where 255 represents
-        foreground and 0 represents background.
-
-    Raises:
-    -------
-    AssertionError
-        If the input image is not in RGB format.
+    - list of np.ndarray - List of clustered contours.
     """
-    # Assert the image is in RGB format
-    assert image.mode == "RGB", "Input image must be in RGB format."
+    current_contours = copy.copy(contours)
+    while len(current_contours) > 1:
+        min_distance = None
+        min_coordinate = None
 
-    # Convert to grayscale and split into left and right halves
-    grayscale = np.array(image.convert("L"))
-    half_image = grayscale.shape[1] // 2
-    left_grayscale = grayscale[:, :half_image]
-    right_grayscale = grayscale[:, half_image:]
+        for x in range(len(current_contours) - 1):
+            for y in range(x + 1, len(current_contours)):
+                distance = calculate_contour_distance(
+                    current_contours[x], current_contours[y],
+                    horizontal_threshold=horizontal_threshold, vertical_threshold=vertical_threshold
+                )
+                if min_distance is None:
+                    min_distance = distance
+                    min_coordinate = (x, y)
+                elif distance < min_distance:
+                    min_distance = distance
+                    min_coordinate = (x, y)
 
-    # Calculate gradient magnitudes for both halves
-    left_grayscale_gradient_magnitude = get_gradient_magnitude(left_grayscale)
-    right_grayscale_gradient_magnitude = get_gradient_magnitude(right_grayscale)
+        if min_distance < threshold_distance:
+            index1, index2 = min_coordinate
+            current_contours[index1] = merge_contours(current_contours[index1], current_contours[index2])
+            del current_contours[index2]
+        else:
+            break
 
-    # Apply Otsu's threshold to create binary masks
-    left_mask = apply_otsu_threshold(left_grayscale_gradient_magnitude)
-    right_mask = apply_otsu_threshold(right_grayscale_gradient_magnitude)
-
-    return left_mask, right_mask
+    return current_contours
 
 
-def inpaint_mask(mask: np.ndarray, crop_side: str, n_margin_cols: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
+def enhance_image_clahe(image_array: np.ndarray, clip_limit: float = 2.0, tile_grid_size: tuple = (8, 8)) -> np.ndarray:
     """
-    Fill gaps in a binary mask by identifying edges of the painting and filling the area between them.
-    Adjusts fill range based on whether the painting touches the left or right side of the mask.
+    Enhances the input image using CLAHE on the L channel in LAB color space.
 
     Parameters:
-    -----------
-    mask : np.ndarray
-        Binary mask array with gaps to be filled, where 255 represents the painting and 0 represents the background.
-    crop_side : str
-        Specifies the side that may have been cropped ('left' or 'right'), guiding the fill to the correct boundary.
+    - image_array: np.ndarray - Input image in BGR color space.
+    - clip_limit: float - Threshold for contrast limiting (default is 2.0).
+    - tile_grid_size: tuple - Size of the grid for histogram equalization (default is (8, 8)).
 
     Returns:
-    --------
-    np.ndarray
-        Mask array with filled gaps, confined to the detected boundaries of the painting.
-
-    Notes:
-    ------
-    Uses Otsu's thresholding to identify valid rows and columns of the painting, then fills between
-    detected boundaries. Special cases are handled if the painting reaches the left or right side of the mask.
+    - np.ndarray - Enhanced image in BGR color space.
     """
+    # Convert to LAB color space
+    lab = cv2.cvtColor(image_array, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
 
-    # Create a copy of the input mask to avoid modifying the original
-    filled_mask = np.copy(mask)
+    # Apply CLAHE to the L channel
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
+    cl = clahe.apply(l)
 
-    # Compute row and column non-zero pixel densities (percentage of the mask that is filled)
-    row_fill_ratios = (filled_mask > 0).mean(axis=1)
-    col_fill_ratios = (filled_mask > 0).mean(axis=0)
+    # Merge channels and convert back to BGR color space
+    enhanced_lab = cv2.merge((cl, a, b))
+    enhanced_img = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2BGR)
 
-    # Determine fill thresholds for rows and columns using Otsu's method
-    row_threshold = filters.threshold_otsu(row_fill_ratios)
-    col_threshold = filters.threshold_otsu(col_fill_ratios)
-
-    # Identify rows and columns with fill density above the threshold
-    filled_rows = np.nonzero(row_fill_ratios > row_threshold)[0]
-    filled_cols = np.nonzero(col_fill_ratios > col_threshold)[0]
-
-    # Get the range of valid rows and columns for the inpaint area
-    row_start, row_end = filled_rows.min(), filled_rows.max()
-    col_start, col_end = filled_cols.min(), filled_cols.max()
-
-    # Handle cases where the painting reaches the side boundaries
-    if crop_side == "left" and mask[(row_fill_ratios > row_threshold), -1].any():
-        col_end = filled_mask.shape[1]  # Fill to the right edge if painting touches the right side
-    elif crop_side == "right" and mask[(row_fill_ratios > row_threshold), -0].any():
-        col_start = 0  # Fill to the left edge if painting touches the left side
-
-    # Fill the inpaint area within detected boundaries
-    filled_mask[row_start:row_end + 1, col_start:col_end + 1] = 255
-
-    # Set values outside the boundaries to 0 to ensure a clean background
-    filled_mask[:row_start, :] = 0
-    filled_mask[row_end + 1:, :] = 0
-    filled_mask[:, :col_start] = 0
-    filled_mask[:, col_end + 1:] = 0
-
-    return filled_mask
+    return enhanced_img
 
 
-def fill_painting_mask(mask: np.ndarray, side: str, n_margin_cols: int = 10, n_margin_rows: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
+def crop_image(image: np.ndarray, contour) -> np.ndarray:
     """
-    Fills the mask of a painting by keeping only the largest connected components
-    and clearing margins based on specified side.
+    Crops the region of the input image that is enclosed by a given contour.
 
     Parameters:
-    -----------
-    mask : np.ndarray
-        Input binary mask where connected components are detected.
-    side : str
-        Specifies the side ("left" or "right") where extra filling should be applied.
-    n_margin_cols : int, optional
-        Number of columns at the left or right edge to clear for component identification. Default is 10.
-    n_margin_rows : int, optional
-        Number of rows at the top and bottom edges to clear for component identification. Default is 10.
+    - image: np.ndarray - Input image.
+    - contour: np.ndarray - Contour defining the region to crop.
 
     Returns:
-    --------
-    np.ndarray
-        Mask where the largest components are filled and specified edges cleared.
+    - np.ndarray - Cropped region of the input image.
     """
-    # Find connected components
-    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
-
-    # Areas of each component, ignoring the background
-    areas = stats[1:, cv2.CC_STAT_AREA]
-    indices = np.arange(len(areas)) + 1  # Ignore background, so index starts from 1
-
-    # Clear the specified margins based on the side
-    if side == "left":
-        labels[:, :n_margin_cols] = 0
-    elif side == "right":
-        labels[:, -n_margin_cols:] = 0
-    labels[:n_margin_rows, :] = 0
-    labels[-n_margin_rows:, :] = 0
-
-    # Mask for the largest connected components
-    largest_components_mask = np.isin(labels, indices).astype(np.uint8) * 255
-    filled_largest_components_mask = inpaint_mask(largest_components_mask, side, n_margin_cols, min_pctg_col)
-
-    return filled_largest_components_mask
+    x, y, w, h = cv2.boundingRect(contour)
+    return image[y:y + h, x:x + w]
 
 
-def correct_vertical_transition_in_concatenated_mask(mask: np.ndarray) -> np.ndarray:
+def sort_contours(contours):
     """
-    Corrects vertical transitions in a binary mask by filling a region defined by
-    the boundary points in the leftmost and rightmost columns.
+    Sorts contours based on their spatial arrangement:
+    - Horizontally if side by side
+    - Vertically if on top of each other
 
     Parameters:
-    -----------
-    mask : np.ndarray
-        Input binary mask where transitions between regions need to be smoothed
-        vertically across the concatenated areas.
+    - contours: list of contours (each contour is a numpy array of shape (N, 1, 2))
 
     Returns:
-    --------
-    np.ndarray
-        Mask with corrected vertical transitions, where the filled region is represented
-        by 255 (foreground) and the rest remains 0 (background).
+    - list of sorted contours
     """
-    # Initialize a new mask for the corrected output
-    corrected_mask = np.zeros(mask.shape, dtype=np.float32)
+    # Calculate bounding boxes for each contour
+    bounding_boxes = [cv2.boundingRect(contour) for contour in contours]
 
-    # Identify non-zero pixel coordinates
-    nonzero_rows, nonzero_cols = np.nonzero(mask)
+    # Determine orientation based on bounding box overlaps
+    total_y_overlap = 0
+    total_x_overlap = 0
+    for i in range(len(bounding_boxes) - 1):
+        x1, y1, w1, h1 = bounding_boxes[i]
+        x2, y2, w2, h2 = bounding_boxes[i + 1]
 
-    # Determine boundary coordinates in the leftmost and rightmost columns
-    top_left_y = nonzero_rows[nonzero_cols == nonzero_cols.min()].min()
-    top_right_y = nonzero_rows[nonzero_cols == nonzero_cols.max()].min()
-    bottom_left_y = nonzero_rows[nonzero_cols == nonzero_cols.min()].max()
-    bottom_right_y = nonzero_rows[nonzero_cols == nonzero_cols.max()].max()
+        # Calculate overlap in y-axis and x-axis
+        y_overlap = max(0, min(y1 + h1, y2 + h2) - max(y1, y2))
+        x_overlap = max(0, min(x1 + w1, x2 + w2) - max(x1, x2))
 
-    # Define the horizontal range and linearly interpolate top and bottom boundaries
-    col_span = nonzero_cols.max() - nonzero_cols.min()
-    top_boundary_y = np.linspace(top_left_y, top_right_y, num=col_span, endpoint=True, dtype=int)
-    bottom_boundary_y = np.linspace(bottom_left_y, bottom_right_y, num=col_span, endpoint=True, dtype=int)
-    x_positions = np.linspace(nonzero_cols.min(), nonzero_cols.max(), num=col_span, endpoint=True, dtype=int)
+        total_y_overlap += y_overlap
+        total_x_overlap += x_overlap
 
-    # Fill the corrected mask based on interpolated boundary lines
-    for y in range(corrected_mask.shape[0]):
-        for idx, x in enumerate(x_positions):
-            if top_boundary_y[idx] <= y <= bottom_boundary_y[idx]:
-                corrected_mask[y, x] = 255
+    # Determine the predominant alignment based on total overlap
+    is_horizontal = total_y_overlap > total_x_overlap
 
-    return corrected_mask
+    # Sort contours based on x-coordinates if horizontal, or y-coordinates if vertical
+    if is_horizontal:
+        sorted_contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[0])  # Sort by x-coordinate
+    else:
+        sorted_contours = sorted(contours, key=lambda c: cv2.boundingRect(c)[1])  # Sort by y-coordinate
+
+    return sorted_contours
 
 
-def get_painting_masks(image: Image, n_margin_cols: int = 10, n_margin_rows: int = 10, min_pctg_col: float = 0.2) -> np.ndarray:
+def get_paintings_cropped_images(
+        image: Image,
+        image_size: int | None = 2 ** 9,
+        min_aspect_ratio: float = 0.125,
+        max_aspect_ratio: float = 8.0,
+        max_distance_to_merge: int = 10,
+        sigma: float = 2.0,
+        output_size: int | None = 2 ** 9
+) -> list[Image]:
     """
-    Generates a concatenated mask of a painting image by processing the left and right sides separately,
-    filling the masks, and applying vertical transition correction if necessary.
+    Detects and crops rectangular regions of interest (such as paintings) from an input image. The function applies
+    edge detection, contour extraction, filtering based on aspect ratio, and agglomerative clustering for grouping
+    nearby contours.
 
     Parameters:
-    -----------
-    image : PIL.Image
-        Input RGB image of the painting.
-    n_margin_cols : int, optional
-        Number of columns to clear at the left or right edges when filling the mask. Default is 10.
-    n_margin_rows : int, optional
-        Number of rows to clear at the top and bottom edges when filling the mask. Default is 10.
+    - image: PIL Image - Input image containing regions of interest to be detected and cropped.
+    - image_size: int or None - Size to which the input image should be resized before processing. Default is 512.
+    - min_aspect_ratio: float - Minimum aspect ratio of contours to be considered. Default is 0.125.
+    - max_aspect_ratio: float - Maximum aspect ratio of contours to be considered. Default is 8.0.
+    - max_distance_to_merge: int - Maximum distance for merging nearby contours during agglomerative clustering. Default is 10.
+    - sigma: float - Standard deviation for Gaussian filter in Canny edge detection. Controls the degree of edge smoothing. Default is 2.0.
+    - output_size: int or None - Size to which each cropped region should be resized. Default is 512.
 
     Returns:
-    --------
-    np.ndarray
-        A concatenated binary mask for the painting, with vertical transition correction if required.
+    - list[Image] - List of cropped PIL Images of detected regions of interest.
+
+    Process:
+    1. Resizes the input image if `image_size` is provided.
+    2. Enhances the image contrast using CLAHE.
+    3. Detects edges in the enhanced image using Canny edge detection with the specified `sigma`.
+    4. Extracts contours from the edge-detected image.
+    5. Filters contours based on their aspect ratio and size.
+    6. Merges nearby contours using agglomerative clustering with a distance threshold.
+    7. Sorts the merged contours for a consistent output order.
+    8. Crops the regions corresponding to each merged contour.
+    9. Resizes each cropped region if `output_size` is specified and returns them as a list of PIL Images.
     """
-    # Obtain initial side masks for the painting
-    left_mask, right_mask = get_painting_side_masks(image)
+    # Convert the image to a NumPy array for processing
+    image_array = np.array(image)
 
-    # Fill the painting masks for each side
-    filled_left_mask = fill_painting_mask(left_mask, side="left", n_margin_cols=n_margin_cols,
-                                          n_margin_rows=n_margin_rows, min_pctg_col=min_pctg_col)
-    filled_right_mask = fill_painting_mask(right_mask, side="right", n_margin_cols=n_margin_cols,
-                                           n_margin_rows=n_margin_rows, min_pctg_col=min_pctg_col)
+    # Resize image if `image_size` is specified
+    if image_size:
+        image_array = cv2.resize(image_array, dsize=(image_size, image_size), interpolation=cv2.INTER_CUBIC)
 
-    # Concatenate the filled masks along the horizontal axis
-    concatenated_mask = np.concatenate((filled_left_mask, filled_right_mask), axis=1)
+    # Enhance image contrast using CLAHE
+    enhanced_image = enhance_image_clahe(image_array)
 
-    # Apply vertical transition correction if there is overlap between left and right masks at the boundary
-    if filled_left_mask[:, -1].any() and filled_right_mask[:, 0].any():
-        concatenated_mask = correct_vertical_transition_in_concatenated_mask(concatenated_mask)
+    # Apply Canny edge detection
+    edges = get_edges_canny(enhanced_image, sigma=sigma)
 
-    return concatenated_mask
+    # Find contours from the edge image
+    contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
 
-
-def crop_image_by_mask(image, mask):
-    """
-    Crops and orders contours from a binary mask of an image, ensuring that contours
-    are returned from left to right based on their leftmost x-coordinate. Contours
-    with height or width equal to 1 are ignored.
-
-    Parameters:
-    -----------
-    image : PIL.Image
-        Input RGB image to be cropped based on the mask.
-    mask : np.ndarray
-        Binary mask where the contours are detected and ordered.
-
-    Returns:
-    --------
-    list of PIL.Image
-        List of cropped images from the input image, corresponding to each contour
-        in the mask, ordered from left to right.
-    """
-    image = np.array(image)
-    mask = (mask > 0).astype(np.uint8)
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cropped_images = []
-
-    # Process each contour
-    valid_contours = []
+    # Filter contours based on aspect ratio and size criteria
+    filtered_contours = []
     for contour in contours:
         x, y, w, h = cv2.boundingRect(contour)
-        if w > 1 and h > 1:  # Ignore small contours with w or h of 1
-            cropped_image = image[y:y + h, x:x + w]
-            valid_contours.append((x, Image.fromarray(cropped_image)))
+        aspect_ratio = w / float(h)
+        if (h >= image_array.shape[0] / 4 or w >= image_array.shape[1] / 4) and (
+                min_aspect_ratio < aspect_ratio < max_aspect_ratio):
+            filtered_contours.append(contour)
 
-    # Sort by the x-coordinate to ensure left-to-right order
-    valid_contours.sort(key=lambda comp: comp[0])
+    # Merge nearby contours using agglomerative clustering
+    merged_contours = agglomerative_cluster(filtered_contours, max_distance_to_merge)
 
-    # Return only the cropped images
-    return [comp[1] for comp in valid_contours]
+    # Sort contours if more than one exists
+    if len(merged_contours) > 1:
+        merged_contours = sort_contours(merged_contours)
+
+    # Crop each region corresponding to a merged contour
+    cropped_images = [crop_image(image_array, contour) for contour in merged_contours]
+
+    # Resize each cropped image if `output_size` is specified
+    if output_size:
+        cropped_images = [cv2.resize(crop, dsize=(output_size, output_size), interpolation=cv2.INTER_CUBIC) for crop in
+                          cropped_images]
+
+    # Convert cropped images to PIL format and return
+    return [Image.fromarray(crop) for crop in cropped_images]
