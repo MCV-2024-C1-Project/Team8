@@ -216,17 +216,18 @@ def sort_contours(contours):
 
     return sorted_contours
 
-def resize_image(image_array: np.ndarray, image_size: int) -> np.ndarray:
+def resize_image(image: np.ndarray, image_size: int) -> np.ndarray:
     """
     Resizes the input image to the specified size using cubic interpolation.
 
     Parameters:
-    - image_array: np.ndarray - Input image to be resized.
+    - image: Image | np.ndarray - Input image to be resized.
     - image_size: int - The new size for both dimensions (height and width) of the image.
 
     Returns:
     - np.ndarray - Resized image.
     """
+    image_array = np.array(image)
     return cv2.resize(image_array, dsize=(image_size, image_size), interpolation=cv2.INTER_CUBIC)
 
 def get_paintings_cropped_images(
