@@ -216,6 +216,18 @@ def sort_contours(contours):
 
     return sorted_contours
 
+def resize_image(image_array: np.ndarray, image_size: int) -> np.ndarray:
+    """
+    Resizes the input image to the specified size using cubic interpolation.
+
+    Parameters:
+    - image_array: np.ndarray - Input image to be resized.
+    - image_size: int - The new size for both dimensions (height and width) of the image.
+
+    Returns:
+    - np.ndarray - Resized image.
+    """
+    return cv2.resize(image_array, dsize=(image_size, image_size), interpolation=cv2.INTER_CUBIC)
 
 def get_paintings_cropped_images(
         image: Image,
@@ -259,7 +271,7 @@ def get_paintings_cropped_images(
 
     # Resize image if `image_size` is specified
     if image_size:
-        image_array = cv2.resize(image_array, dsize=(image_size, image_size), interpolation=cv2.INTER_CUBIC)
+        image_array = resize_image(image_array, image_size)
 
     # Enhance image contrast using CLAHE
     enhanced_image = enhance_image_clahe(image_array)
@@ -291,8 +303,7 @@ def get_paintings_cropped_images(
 
     # Resize each cropped image if `output_size` is specified
     if output_size:
-        cropped_images = [cv2.resize(crop, dsize=(output_size, output_size), interpolation=cv2.INTER_CUBIC) for crop in
-                          cropped_images]
+        cropped_images = [resize_image(crop, output_size) for crop in cropped_images]
 
     # Convert cropped images to PIL format and return
     return [Image.fromarray(crop) for crop in cropped_images]
