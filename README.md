@@ -2,6 +2,8 @@
 
 Welcome to the repository for **Team8**'s project in **C1: Introduction to Human and Computer Vision**. This repository contains all the code, data, and results for the various weekly tasks as part of the course.
 
+Slides of the final presentation : https://docs.google.com/presentation/d/1AjJbfE0tqhlhi2BBxQSKj4C4YKtB8evcadvAOSOPUv8/edit?usp=sharing
+
 ## Project Setup
 
 ### Requirements
